@@ -856,9 +856,16 @@ jobs:
           # The zip is published alongside the tarball, not instead of it —
           # Homebrew and the npm runtime packages still read the tarball.
           # 7z rather than zip: the Windows bundle now builds on windows-latest,
-          # and Git Bash there has no zip. 7z is on both runner images.
+          # and Git Bash there has no zip. 7-Zip is on the image but the runner
+          # docs do not promise it on PATH, so fall back to its install path
+          # rather than failing the release on a lookup.
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            7z a -tzip -bso0 -bsp0 "kandev-${{ matrix.platform }}.zip" kandev
+            sevenzip=7z
+            if ! command -v "$sevenzip" >/dev/null 2>&1; then
+              sevenzip="/c/Program Files/7-Zip/7z.exe"
+              test -x "$sevenzip" || { echo "7-Zip not found on PATH or at $sevenzip" >&2; exit 1; }
+            fi
+            "$sevenzip" a -tzip -bso0 -bsp0 "kandev-${{ matrix.platform }}.zip" kandev
             shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
           fi
 
