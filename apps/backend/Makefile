@@ -245,11 +245,13 @@ build-all: build build-agentctl
 	@echo "Building individual services..."
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager$(EXE) ./cmd/agent-manager
 
-## Build the agentctl sidecar binary (includes embedded MCP server)
+## Build the agentctl sidecar binary (includes embedded MCP server). Carries
+## $(CGO_LOCALE) because agentctl imports cgo (unlike mock-agent/acpdbg/winjob),
+## so its native `go build` invokes gcc; see the CGO_LOCALE note above.
 build-agentctl:
 	@echo "Building agentctl..."
 	-@$(MKDIR) $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+	$(CGO_LOCALE) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
 ## Build only the agentctl helpers needed by the development profile.
 build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)

@@ -140,7 +140,30 @@ else
 	printf 'ok    %-16s %s\n' "static" 'no literal /dev/null inside $(shell ...)'
 fi
 
+# Static guard: native cgo host builds carry the $(CGO_LOCALE) prefix.
+#
+# kandev (-tags fts5) and agentctl both import cgo (go list -deps reports CgoFiles),
+# so their native `go build` invokes gcc and fails on a non-ASCII toolchain path
+# under Git Bash unless prefixed with $(CGO_LOCALE) — exactly the miss that first
+# shipped build-agentctl without it. Cross builds set CGO_ENABLED=0 / GOOS= and do
+# not invoke gcc, so they are excluded. Extend the cmd list here if another host
+# binary starts importing cgo.
+cgo_status=0
+cgo_unprefixed=$(grep -nE '\$\(GO\) build' "$backend_dir/Makefile" \
+	| grep -E '\./cmd/(kandev|agentctl)$' \
+	| grep -vE 'CGO_LOCALE|GOOS=|\$\(GO_(LINUX|DARWIN)') || cgo_status=$?
+if [ "$cgo_status" -gt 1 ]; then
+	printf 'FAIL  %-16s unable to scan Makefile (grep exit %s)\n' "static-cgo" "$cgo_status"
+	status=1
+elif [ -n "$cgo_unprefixed" ]; then
+	printf 'FAIL  %-16s native cgo build without $(CGO_LOCALE):\n' "static-cgo"
+	printf '        %s\n' "$cgo_unprefixed"
+	status=1
+else
+	printf 'ok    %-16s %s\n' "static-cgo" 'native cgo host builds carry $(CGO_LOCALE)'
+fi
+
 if [ "$status" -eq 0 ]; then
-	echo "All Makefile shell-dispatch checks passed (run/dev/start-debug/deadcode/test x 3 shells, plus static guard)."
+	echo "All Makefile shell-dispatch checks passed (run/dev/start-debug/deadcode/test x 3 shells, plus static guards)."
 fi
 exit "$status"
