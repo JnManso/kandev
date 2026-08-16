@@ -355,8 +355,11 @@ func cleanRuntimeConfigOptions(options map[string]string) map[string]string {
 		return nil
 	}
 	cleaned := maps.Clone(options)
+	// Reserved identity keys: model/mode are carried as top-level fields and
+	// "agent" identifies the running agent. None is a selectable dynamic option.
 	delete(cleaned, "model")
 	delete(cleaned, "mode")
+	delete(cleaned, "agent")
 	if len(cleaned) == 0 {
 		return nil
 	}

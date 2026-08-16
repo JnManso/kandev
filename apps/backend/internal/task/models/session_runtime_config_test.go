@@ -23,6 +23,7 @@ func TestLoadEffectiveSessionRuntimeConfigMergesInPrecedenceOrder(t *testing.T) 
 				ConfigOptions: map[string]string{
 					"model":             "provider-model",
 					"mode":              "provider-mode",
+					"agent":             "provider-agent",
 					"provider_replaced": "provider-value",
 					"provider_only":     "provider",
 				},

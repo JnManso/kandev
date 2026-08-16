@@ -26,6 +26,11 @@ func TestSanitizeConfigOptions(t *testing.T) {
 			want: map[string]string{"effort": "low"},
 		},
 		{
+			name: "reserved agent key dropped",
+			in:   map[string]string{"agent": "claude", "effort": "high"},
+			want: map[string]string{"effort": "high"},
+		},
+		{
 			name: "blank value dropped",
 			in:   map[string]string{"effort": "", "level": "high"},
 			want: map[string]string{"level": "high"},
@@ -42,7 +47,7 @@ func TestSanitizeConfigOptions(t *testing.T) {
 		},
 		{
 			name: "all reserved returns nil",
-			in:   map[string]string{"model": "opus", "mode": "plan"},
+			in:   map[string]string{"model": "opus", "mode": "plan", "agent": "claude"},
 			want: nil,
 		},
 	}

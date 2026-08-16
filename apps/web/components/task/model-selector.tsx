@@ -47,10 +47,11 @@ function configValueKeys(value: unknown): string[] {
 }
 
 const MODEL_CONFIG_KEY = "model";
-// "agent" records which agent runs the session — a reserved identity key, never
-// a runtime-selectable ACP config option, so it can never appear in configOptions
-// and must not gate the selector (mirrors the model/mode reserved keys the
-// backend already strips in SanitizeConfigOptions / cleanRuntimeConfigOptions).
+// "agent" is a reserved identity key (which agent runs the session), enforced at
+// the shared backend boundary alongside model/mode (profileconfig.SanitizeConfigOptions
+// and cleanRuntimeConfigOptions strip it). It is never a selectable ACP config
+// option, so a residual or legacy "agent" key (e.g. a persisted session snapshot)
+// must not gate the selector.
 const AGENT_CONFIG_KEY = "agent";
 
 export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
