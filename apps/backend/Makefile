@@ -109,18 +109,23 @@ endif
 # CGO locale for Git Bash/MSYS on Windows.
 #
 # This mingw (WinLibs) gcc resolves its own install path, then passes it to ld/
-# collect2 across a locale-sensitive boundary. Under a UTF-8 LANG, ld mis-decodes
+# collect2 across a locale-sensitive boundary. Under a UTF-8 locale, ld mis-decodes
 # the ANSI-encoded path, so a non-ASCII segment (e.g. an accented Windows
 # username under C:\Users\...) collapses to U+FFFD and the link cannot find
-# crt2.o / crtbegin.o / -lm. Forcing LANG=C keeps the raw path bytes, so the CGO
-# link resolves. See docs/public/windows-support.md.
+# crt2.o / crtbegin.o / -lm. Forcing the C locale keeps the raw path bytes, so the
+# CGO link resolves. See docs/public/windows-support.md.
+#
+# Use LC_ALL=C, not LANG=C: LANG is the lowest-precedence locale variable
+# (LC_ALL > LC_CTYPE > LANG), so LANG=C is silently ignored when the shell already
+# exports LC_ALL or LC_CTYPE as UTF-8. LC_ALL=C overrides them all.
 #
 # Scope mirrors the shell-syntax block above: Windows but NOT native cmd, i.e.
-# $(MSYSTEM) is set, so this is Git Bash/MSYS. Empty on Unix, native cmd, and any
-# ASCII toolchain path, where `$(CGO_LOCALE) ` is a harmless no-op prefix.
+# $(MSYSTEM) is set, so this is Git Bash/MSYS. It is empty only on Unix and native
+# cmd. On Git Bash/MSYS the prefix is always applied: a harmless no-op on an ASCII
+# toolchain path, and the actual fix on a non-ASCII one.
 ifeq ($(OS),Windows_NT)
   ifneq ($(OS)$(MSYSTEM),Windows_NT)
-    CGO_LOCALE := LANG=C
+    CGO_LOCALE := LC_ALL=C
   endif
 endif
 

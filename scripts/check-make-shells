@@ -81,10 +81,11 @@ expect git-bash Windows_NT MINGW64 start-debug "KANDEV_DEBUG_PPROF_ENABLED=true 
 
 # deadcode — the analyzer is invoked through the same shell-specific env-prefix
 # mechanism, but its command has no __backend marker, so match its module path.
-# Git Bash additionally carries the CGO_LOCALE prefix (LANG=C): deadcode compiles
+# Git Bash additionally carries the CGO_LOCALE prefix (LC_ALL=C): deadcode compiles
 # the -tags fts5 cgo packages, and this mingw gcc mis-decodes its own non-ASCII
-# install path under a UTF-8 LANG (see docs/public/windows-support.md). Unix and
-# native cmd stay LANG-free.
+# install path under a UTF-8 locale (see docs/public/windows-support.md). LC_ALL=C
+# (not LANG=C) is used so it overrides an inherited LC_ALL/LC_CTYPE. Unix and
+# native cmd stay locale-free.
 expect unix '' '' deadcode \
 	'GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
@@ -92,8 +93,22 @@ expect windows-native Windows_NT '' deadcode \
 	'set GOTOOLCHAIN=go1.26.0& go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
 expect git-bash Windows_NT MINGW64 deadcode \
-	'LANG=C GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
+	'LC_ALL=C GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
+
+# test — a second CGO_LOCALE consumer, so the prefix is not proven for deadcode
+# alone. The `test` recipe is deterministic (no version/timestamp ldflags), so
+# assert it in full across all three shells: Git Bash carries LC_ALL=C, Unix and
+# native cmd do not.
+expect git-bash Windows_NT MINGW64 test \
+	'LC_ALL=C CGO_ENABLED=1 go test -tags fts5 ./...' \
+	'go test -tags fts5'
+expect unix '' '' test \
+	'CGO_ENABLED=1 go test -tags fts5 ./...' \
+	'go test -tags fts5'
+expect windows-native Windows_NT '' test \
+	'set CGO_ENABLED=1& go test -tags fts5 ./...' \
+	'go test -tags fts5'
 
 # Static guard: no literal /dev/null inside $(shell ...).
 #
@@ -126,6 +141,6 @@ else
 fi
 
 if [ "$status" -eq 0 ]; then
-	echo "All Makefile shell-dispatch checks passed (3 shells x 4 targets, plus static guard)."
+	echo "All Makefile shell-dispatch checks passed (run/dev/start-debug/deadcode/test x 3 shells, plus static guard)."
 fi
 exit "$status"
