@@ -81,6 +81,10 @@ expect git-bash Windows_NT MINGW64 start-debug "KANDEV_DEBUG_PPROF_ENABLED=true 
 
 # deadcode — the analyzer is invoked through the same shell-specific env-prefix
 # mechanism, but its command has no __backend marker, so match its module path.
+# Git Bash additionally carries the CGO_LOCALE prefix (LANG=C): deadcode compiles
+# the -tags fts5 cgo packages, and this mingw gcc mis-decodes its own non-ASCII
+# install path under a UTF-8 LANG (see docs/public/windows-support.md). Unix and
+# native cmd stay LANG-free.
 expect unix '' '' deadcode \
 	'GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
@@ -88,7 +92,7 @@ expect windows-native Windows_NT '' deadcode \
 	'set GOTOOLCHAIN=go1.26.0& go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
 expect git-bash Windows_NT MINGW64 deadcode \
-	'GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
+	'LANG=C GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
 
 # Static guard: no literal /dev/null inside $(shell ...).

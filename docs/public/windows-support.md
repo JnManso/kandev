@@ -202,6 +202,14 @@ winget install ezwinports.make
 
 The repository bootstrap script is Bash/package-manager oriented and does not provision a native Windows toolchain automatically. Use Git Bash or another compatible shell for Unix-oriented root recipes, install the pinned tools manually, and follow the contributor guide. `make dev` builds a `winjob.exe` helper so `Ctrl+C` can close a native development process tree.
 
+### CGO link failure with a non-ASCII toolchain path
+
+The `kandev` binary and the backend tests build with CGO and SQLite FTS5. If the MinGW/GCC toolchain resolves to a path with non-ASCII characters (most commonly an accented Windows username, which puts the toolchain under `C:\Users\<name>\`), a UTF-8 `LANG` in Git Bash makes GCC mis-decode its own install path when it hands it to `ld`. The link then fails with `cannot find crt2.o`, `crtbegin.o`, and `-lm`, even though the files exist.
+
+The CGO Make targets (`build-kandev`, the `-tags fts5` test targets, and `deadcode`) set `LANG=C` automatically when they run under Git Bash/MSYS on Windows, so `make build`, `make dev`, and `make test-backend` work out of the box. The prefix is a no-op on Unix, on native `cmd`/PowerShell, and on any ASCII toolchain path.
+
+When invoking `go build`/`go test` directly, prefix the command with `LANG=C` (for example `LANG=C go build -tags fts5 ./cmd/kandev`). To remove the cause entirely, install the toolchain at an ASCII path outside `C:\Users\<name>` and point `CC`/`CXX` at it. Do not `export LANG=C` globally in your shell profile; that disables the UTF-8 locale for all of Git Bash.
+
 Backend Windows CI runs `go build ./...`, `go vet ./...`, and focused race tests for Windows-sensitive process, agent-launcher, instance-port, and websocket-tunnel packages. It does not run every backend package or the full product E2E suite. The repository's broader Windows-clean target adds web and CLI unit tests:
 
 ```powershell
