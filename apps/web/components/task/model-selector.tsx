@@ -47,6 +47,11 @@ function configValueKeys(value: unknown): string[] {
 }
 
 const MODEL_CONFIG_KEY = "model";
+// "agent" records which agent runs the session — a reserved identity key, never
+// a runtime-selectable ACP config option, so it can never appear in configOptions
+// and must not gate the selector (mirrors the model/mode reserved keys the
+// backend already strips in SanitizeConfigOptions / cleanRuntimeConfigOptions).
+const AGENT_CONFIG_KEY = "agent";
 
 export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
   if (!session) return [];
@@ -84,7 +89,10 @@ export function hasCompleteDynamicConfig(
   // list — the selector renders fine from it.
   const hasFlatModelList = !!sessionModelsData.models.length;
   return required.every(
-    (key) => available.has(key) || (key === MODEL_CONFIG_KEY && hasFlatModelList),
+    (key) =>
+      available.has(key) ||
+      key === AGENT_CONFIG_KEY ||
+      (key === MODEL_CONFIG_KEY && hasFlatModelList),
   );
 }
 
