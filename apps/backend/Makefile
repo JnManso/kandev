@@ -50,9 +50,9 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
   # stderr to NUL so that noise stays out of build logs (surfaced by repeated
   # `make start-windows-debug` runs over an existing bin/). cmd pulls the
   # redirect out wherever it sits on the line, so the dir the call sites append
-  # is still mkdir's operand. Call sites keep the `-@$(MKDIR) $(BUILD_DIR)` form
-  # (note the `-` prefix) so the non-zero exit on an existing dir is tolerated;
-  # on Unix the prefix is a no-op.
+  # is still mkdir's operand. Main build call sites use the `-@$(MKDIR) $(BUILD_DIR)`
+  # form (note the `-` prefix) so the non-zero exit on an existing dir is tolerated.
+  # Other call sites retain their existing Make error handling.
   MKDIR = cmd /c mkdir 2>NUL
   CGO_PREFIX = set CGO_ENABLED=1&
   DEADCODE_ENV = set GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN)&
