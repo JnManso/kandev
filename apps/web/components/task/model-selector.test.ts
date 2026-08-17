@@ -299,10 +299,10 @@ describe("hasCompleteDynamicConfig", () => {
     expect(hydrated).toBe(true);
   });
 
-  it("keeps a provider-defined agent option required", () => {
+  it("treats an unadvertised agent config value as satisfied (any value, not just identity)", () => {
     const session = makeSession({
       metadata: {
-        runtime_config: { config_options: { agent: "build", model: flatModelId } },
+        runtime_config: { config_options: { agent: "default", model: flatModelId } },
       },
       agent_profile_snapshot: { agent_id: "claude" },
     });
@@ -313,7 +313,7 @@ describe("hasCompleteDynamicConfig", () => {
       noAgents,
     );
 
-    expect(hydrated).toBe(false);
+    expect(hydrated).toBe(true);
   });
 
   it("is hydrated when there are no required config keys", () => {
