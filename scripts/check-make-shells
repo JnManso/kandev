@@ -91,6 +91,15 @@ expect git-bash Windows_NT MINGW64 deadcode \
 	'GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
 
+# mkdir — the Windows branch must send cmd's stderr to NUL so rebuilding over an
+# existing bin/ does not spew "A subdirectory or file bin already exists." into
+# the logs (surfaced by `make start-windows-debug`). The -@ call sites already
+# tolerate the non-zero exit; this only silences the chatter. Unix and Git Bash
+# use idempotent `mkdir -p`, which is silent by design.
+expect unix '' '' build-kandev 'mkdir -p bin' mkdir
+expect windows-native Windows_NT '' build-kandev 'cmd /c mkdir 2>NUL bin' mkdir
+expect git-bash Windows_NT MINGW64 build-kandev 'mkdir -p bin' mkdir
+
 # Static guard: no literal /dev/null inside $(shell ...).
 #
 # Unlike a recipe, which only ever runs on a platform its target supports,
@@ -122,6 +131,6 @@ else
 fi
 
 if [ "$status" -eq 0 ]; then
-	echo "All Makefile shell-dispatch checks passed (3 shells x 4 targets, plus static guard)."
+	echo "All Makefile shell-dispatch checks passed (3 shells x 5 targets, plus static guard)."
 fi
 exit "$status"
