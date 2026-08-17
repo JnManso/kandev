@@ -49,6 +49,13 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
   const metadata = comment.metadata as ActionMeta | undefined;
   const message = comment.content || t("task:anErrorOccurred");
+  // The recovery acknowledgment lives here, on the message row that stays
+  // mounted, not on SettledFailureMessage: a successful resume drives the
+  // session through STARTING/RUNNING (which unmounts the card via
+  // isSessionActive) and back to WAITING_FOR_INPUT once the agent is idle.
+  // Local state on the card would reset on that remount and the recovery banner
+  // would reappear until the next user message.
+  const [recoveryRequested, setRecoveryRequested] = useState(false);
 
   if (metadata?.action_visibility === "running") {
     if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
@@ -74,6 +81,8 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={comment.task_id}
+      recoveryRequested={recoveryRequested}
+      onRecoveryRequested={() => setRecoveryRequested(true)}
     />
   );
 });
@@ -84,12 +93,16 @@ function SettledActionMessage({
   sessionError,
   sessionState,
   taskId,
+  recoveryRequested,
+  onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
   message: string;
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
+  recoveryRequested: boolean;
+  onRecoveryRequested: () => void;
 }) {
   // A retry card is persisted against the failed turn, so hide it while the
   // replacement turn is starting or running to avoid showing stale progress.
@@ -106,6 +119,8 @@ function SettledActionMessage({
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={taskId}
+      recoveryRequested={recoveryRequested}
+      onRecoveryRequested={onRecoveryRequested}
     />
   );
 }
@@ -116,17 +131,21 @@ function SettledFailureMessage({
   sessionError,
   sessionState,
   taskId,
+  recoveryRequested,
+  onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
   message: string;
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
+  recoveryRequested: boolean;
+  onRecoveryRequested: () => void;
 }) {
-  const [recoveryRequested, setRecoveryRequested] = useState(false);
-
   // A waiting session can still need recovery, so only hide this persisted
   // card after its own Resume request is acknowledged (or the session starts).
+  // `recoveryRequested` is owned by ActionMessage so the acknowledgment
+  // survives the isSessionActive unmount above during a resume.
   if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryRequested))
     return null;
 
@@ -135,7 +154,7 @@ function SettledFailureMessage({
     message,
     sessionError,
     taskId,
-    onRecoveryRequested: () => setRecoveryRequested(true),
+    onRecoveryRequested,
   });
   if (specialRecovery) return specialRecovery;
 
@@ -158,9 +177,7 @@ function SettledFailureMessage({
             <ActionButtons
               actions={metadata.actions}
               taskId={taskId}
-              onRecoveryRequested={
-                metadata.recovery_actions ? () => setRecoveryRequested(true) : undefined
-              }
+              onRecoveryRequested={metadata.recovery_actions ? onRecoveryRequested : undefined}
             />
           )}
         </div>

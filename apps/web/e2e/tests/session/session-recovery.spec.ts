@@ -223,6 +223,13 @@ test.describe("Session recovery", () => {
       },
     );
 
+    // The resume settles the session back to WAITING_FOR_INPUT (agent idle).
+    // The recovery card must not reappear now that the acknowledgment is
+    // remembered — before the fix it came back until the next message flipped
+    // the session to RUNNING, without the user ever typing anything.
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
+
     // Verify agent works after recovery
     await session.sendMessage("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
