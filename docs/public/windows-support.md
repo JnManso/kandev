@@ -210,6 +210,8 @@ The CGO Make targets (`build-kandev`, `build-agentctl`, the `-tags fts5` test ta
 
 When invoking `go build`/`go test` directly, prefix the command with `LC_ALL=C` (for example `LC_ALL=C go build -tags fts5 ./cmd/kandev`). To remove the cause entirely, install the toolchain at an ASCII path outside `C:\Users\<name>` and point `CC`/`CXX` at it. Do not force the C locale globally (for example `export LC_ALL=C`) in your shell profile; that disables the UTF-8 locale for all of Git Bash.
 
+A third option removes the cause at the OS level. Enable Windows' **Beta: Use Unicode UTF-8 for worldwide language support** (Region control panel, **Administrative** tab, **Change system locale**, then reboot). This sets the system ANSI code page to UTF-8, so GCC and `ld` agree on the path encoding and the accented toolchain path links directly under a UTF-8 locale, with no `LC_ALL=C` prefix and no toolchain relocation. It is a **beta**, system-wide setting: it requires a reboot and can change how other non-UTF-8 applications interpret text, so treat it as opt-in.
+
 Backend Windows CI runs `go build ./...`, `go vet ./...`, and focused race tests for Windows-sensitive process, agent-launcher, instance-port, and websocket-tunnel packages. It does not run every backend package or the full product E2E suite. The repository's broader Windows-clean target adds web and CLI unit tests:
 
 ```powershell
