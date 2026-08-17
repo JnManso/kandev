@@ -96,14 +96,12 @@ expect git-bash Windows_NT MINGW64 deadcode \
 	'GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
 	'golang.org/x/tools/cmd/deadcode'
 
-# mkdir — the Windows branch must send cmd's stderr to NUL so rebuilding over an
-# existing bin/ does not spew "A subdirectory or file bin already exists." into
-# the logs (surfaced by `make start-windows-debug`). The -@ call sites already
-# tolerate the non-zero exit; this only silences the chatter. Unix and Git Bash
-# use idempotent `mkdir -p`, which is silent by design.
-expect unix '' '' build-kandev 'mkdir -p bin' mkdir
-expect windows-native Windows_NT '' build-kandev 'cmd /c mkdir 2>NUL bin' mkdir
-expect git-bash Windows_NT MINGW64 build-kandev 'mkdir -p bin' mkdir
+# mkdir — the Windows branch must check for the directory before calling cmd's
+# mkdir, so rebuilding over an existing bin/ stays quiet while other errors stay
+# visible. Unix and Git Bash use idempotent `mkdir -p`, which is silent by design.
+expect unix '' '' build-kandev 'mkdir -p "bin"' mkdir
+expect windows-native Windows_NT '' build-kandev 'cmd /c if not exist "bin" mkdir "bin"' mkdir
+expect git-bash Windows_NT MINGW64 build-kandev 'mkdir -p "bin"' mkdir
 
 # When cmd.exe is available, execute the captured native-Windows recipe against
 # a temporary directory. This checks that an existing directory stays quiet.
@@ -118,7 +116,7 @@ check_native_mkdir_behavior() {
 	probe_dir="$backend_dir/$probe_name"
 	stderr_file=$(mktemp)
 	inner=${recipe#cmd /c }
-	inner="${inner% bin} ${probe_name}"
+	inner=${inner//bin/$probe_name}
 
 	rm -rf "$probe_dir"
 	first_status=0
