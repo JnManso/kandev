@@ -48,9 +48,12 @@ function configValueKeys(value: unknown): string[] {
 
 const MODEL_CONFIG_KEY = "model";
 // "agent" identifies which agent runs the session; it is never an ACP-selectable
-// config option (never advertised in configOptions). A recorded "agent" key,
-// whether a legacy identity value or a stale value like "default", must not gate
-// the selector. A genuinely advertised option would satisfy available.has(key).
+// config option. A recorded "agent" key (a legacy identity or a stale value like
+// "default") must not gate the selector, but only once the ACP session has
+// advertised its options (available is non-empty). On a fresh relaunch, models can
+// be published with an empty configOptions array before the real options arrive;
+// waiting for a non-empty set avoids marking that partial state hydrated. A
+// genuinely advertised "agent" option satisfies available.has(key) first.
 const AGENT_CONFIG_KEY = "agent";
 
 export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
@@ -91,7 +94,7 @@ export function hasCompleteDynamicConfig(
   return required.every(
     (key) =>
       available.has(key) ||
-      key === AGENT_CONFIG_KEY ||
+      (key === AGENT_CONFIG_KEY && available.size > 0) ||
       (key === MODEL_CONFIG_KEY && hasFlatModelList),
   );
 }

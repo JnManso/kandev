@@ -281,25 +281,34 @@ describe("hasCompleteDynamicConfig", () => {
     expect(hydrated).toBe(false);
   });
 
-  it("treats a legacy agent identity key as satisfied without an ACP option", () => {
+  it("treats an unadvertised agent config value as satisfied once ACP options have settled", () => {
     const session = makeSession({
       metadata: {
-        runtime_config: { config_options: { agent: "claude", model: flatModelId } },
+        runtime_config: {
+          config_options: { agent: "default", model: flatModelId, verbosity: "terse" },
+        },
       },
       agent_profile_snapshot: { agent_id: "claude" },
     });
-    expect(requiredConfigKeys(session, noAgents)).toEqual(["agent", "model"]);
+    expect(requiredConfigKeys(session, noAgents)).toEqual(["agent", "model", "verbosity"]);
 
+    const settledOption: ConfigOptionEntry = {
+      type: "select",
+      id: "verbosity",
+      name: "Verbosity",
+      currentValue: "terse",
+      options: [{ value: "terse", name: "Terse" }],
+    };
     const hydrated = hasCompleteDynamicConfig(
       session,
-      { currentModelId: flatModelId, models: flatModelEntries(), configOptions: [] },
+      { currentModelId: flatModelId, models: flatModelEntries(), configOptions: [settledOption] },
       noAgents,
     );
 
     expect(hydrated).toBe(true);
   });
 
-  it("treats an unadvertised agent config value as satisfied (any value, not just identity)", () => {
+  it("does not mark an agent key satisfied while ACP config options are still empty", () => {
     const session = makeSession({
       metadata: {
         runtime_config: { config_options: { agent: "default", model: flatModelId } },
@@ -313,7 +322,7 @@ describe("hasCompleteDynamicConfig", () => {
       noAgents,
     );
 
-    expect(hydrated).toBe(true);
+    expect(hydrated).toBe(false);
   });
 
   it("is hydrated when there are no required config keys", () => {
