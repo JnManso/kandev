@@ -669,7 +669,7 @@ func (sm *SessionManager) publishSettledConfigOptions(
 		return
 	}
 	baselineCandidate, live, ready := execution.SettleConfigOptions(finalConfigID, providerDefaultConfig)
-	if !ready || len(baselineCandidate.ConfigOptions) == 0 || live == nil {
+	if !ready || baselineCandidate == nil || live == nil {
 		return
 	}
 	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{

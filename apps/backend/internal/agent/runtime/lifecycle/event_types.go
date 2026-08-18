@@ -546,6 +546,9 @@ type SessionModelsEventPayload struct {
 	CurrentModelID string                     `json:"current_model_id"`
 	Models         []streams.SessionModelInfo `json:"models"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
+	// from the transient empty state sent before startup settles.
+	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
 	// ConfigBaseline is the persisted ID/value projection used by clients to
 	// compare the current ConfigOptions without duplicating provider metadata.
 	ConfigBaseline map[string]string `json:"config_baseline,omitempty"`
@@ -588,9 +591,10 @@ func (p SessionModelSelectionWarningEventPayload) GetSessionID() string {
 // SessionModelsSnapshot is the persisted provider-derived state needed to
 // hydrate the task model selector before live session events reconnect.
 type SessionModelsSnapshot struct {
-	CurrentModelID string                     `json:"current_model_id"`
-	Models         []streams.SessionModelInfo `json:"models"`
-	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	CurrentModelID       string                     `json:"current_model_id"`
+	Models               []streams.SessionModelInfo `json:"models"`
+	ConfigOptions        []streams.ConfigOption     `json:"config_options,omitempty"`
+	ConfigOptionsSettled bool                       `json:"config_options_settled,omitempty"`
 }
 
 // LoadSessionModelsSnapshot decodes typed and JSON-rehydrated metadata values.
@@ -599,7 +603,7 @@ func LoadSessionModelsSnapshot(raw any) (SessionModelsSnapshot, bool) {
 		return SessionModelsSnapshot{}, false
 	}
 	if snapshot, ok := raw.(SessionModelsSnapshot); ok {
-		return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0
+		return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0 || snapshot.ConfigOptionsSettled
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
@@ -609,7 +613,7 @@ func LoadSessionModelsSnapshot(raw any) (SessionModelsSnapshot, bool) {
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return SessionModelsSnapshot{}, false
 	}
-	return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0
+	return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0 || snapshot.ConfigOptionsSettled
 }
 
 // LoadMCPAttachmentHistory decodes typed and JSON-rehydrated MCP attachment

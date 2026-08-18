@@ -340,6 +340,7 @@ function buildSessionModelsState(session: TaskSession | null) {
           currentModelId,
           models,
           configOptions,
+          configOptionsSettled: snapshot.config_options_settled === true,
           configBaseline: stringMap(metadata.session.metadata?.acp_config_baseline),
         },
       },

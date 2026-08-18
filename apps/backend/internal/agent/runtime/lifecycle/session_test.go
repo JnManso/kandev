@@ -705,6 +705,32 @@ func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
 	}
 }
 
+func TestPublishSettledConfigOptionsAllowsEmptyProviderSnapshot(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "claude-opus-4-8",
+		Models:         []streams.SessionModelInfo{{ModelID: "claude-opus-4-8", Name: "Claude Opus 4.8"}},
+	})
+
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "", nil)
+
+	settled := eventBus.getStreamEvents()
+	if len(settled) != 1 {
+		t.Fatalf("settled event count = %d, want one empty-config snapshot", len(settled))
+	}
+	if !settledConfigEventData(settled[0].Data.Data) {
+		t.Fatal("empty-config snapshot must carry the settlement marker")
+	}
+	if len(settled[0].Data.ConfigOptions) != 0 {
+		t.Fatalf("settled config options = %#v, want empty", settled[0].Data.ConfigOptions)
+	}
+}
+
 func TestConfigBaselineRetainsProviderDefaultsWhenProfileOverrideSettles(t *testing.T) {
 	log := newSessionTestLogger()
 	eventBus := &MockEventBusWithTracking{}

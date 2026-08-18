@@ -498,6 +498,9 @@ type CachedModelState struct {
 	ConfigOptions  []streams.ConfigOption
 	ConfigSource   string
 	ConfigID       string
+	// ConfigOptionsSettled is true after startup config application has a
+	// complete provider snapshot, including snapshots with no options.
+	ConfigOptionsSettled bool
 }
 
 type configSettlement struct {
@@ -579,8 +582,11 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 	}
 	if settlement.configID == "" {
 		ae.pendingConfigSettlement = nil
+		state.ConfigOptionsSettled = true
 		if settlement.providerDefault != nil {
-			return cloneCachedModelState(settlement.providerDefault), true
+			settled := cloneCachedModelState(settlement.providerDefault)
+			settled.ConfigOptionsSettled = true
+			return settled, true
 		}
 		return state, true
 	}
@@ -589,12 +595,18 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 		return state, false
 	}
 	ae.pendingConfigSettlement = nil
+	state.ConfigOptionsSettled = true
 	if settlement.providerDefault != nil {
-		return cloneCachedModelState(settlement.providerDefault), true
+		settled := cloneCachedModelState(settlement.providerDefault)
+		settled.ConfigOptionsSettled = true
+		return settled, true
 	}
 	if ae.providerDefaultModelState != nil {
-		return cloneCachedModelState(ae.providerDefaultModelState), true
+		settled := cloneCachedModelState(ae.providerDefaultModelState)
+		settled.ConfigOptionsSettled = true
+		return settled, true
 	}
+	response.ConfigOptionsSettled = true
 	return response, true
 }
 
@@ -625,11 +637,12 @@ func cloneCachedModelState(state *CachedModelState) *CachedModelState {
 		return nil
 	}
 	cloned := &CachedModelState{
-		CurrentModelID: state.CurrentModelID,
-		Models:         append([]streams.SessionModelInfo(nil), state.Models...),
-		ConfigOptions:  append([]streams.ConfigOption(nil), state.ConfigOptions...),
-		ConfigSource:   state.ConfigSource,
-		ConfigID:       state.ConfigID,
+		CurrentModelID:       state.CurrentModelID,
+		Models:               append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:        append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		ConfigSource:         state.ConfigSource,
+		ConfigID:             state.ConfigID,
+		ConfigOptionsSettled: state.ConfigOptionsSettled,
 	}
 	for i := range cloned.ConfigOptions {
 		cloned.ConfigOptions[i].Options = append(

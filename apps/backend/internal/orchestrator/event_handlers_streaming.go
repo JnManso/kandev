@@ -2926,19 +2926,21 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.Error(err))
 		return
 	}
-	s.persistSessionModelAndRuntimeConfig(
-		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions,
+	settled := configOptionsSettled(payload.Data.Data)
+	s.persistSessionModelAndRuntimeConfigWithSettlement(
+		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
 	)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
-		TaskID:         payload.TaskID,
-		SessionID:      sessionID,
-		AgentID:        payload.AgentID,
-		CurrentModelID: payload.Data.CurrentModelID,
-		Models:         payload.Data.SessionModels,
-		ConfigOptions:  payload.Data.ConfigOptions,
-		ConfigBaseline: configBaseline,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		TaskID:               payload.TaskID,
+		SessionID:            sessionID,
+		AgentID:              payload.AgentID,
+		CurrentModelID:       payload.Data.CurrentModelID,
+		Models:               payload.Data.SessionModels,
+		ConfigOptions:        payload.Data.ConfigOptions,
+		ConfigOptionsSettled: settled,
+		ConfigBaseline:       configBaseline,
+		Timestamp:            time.Now().UTC().Format(time.RFC3339),
 	}
 	s.logger.Info("publishing session_models event to WS",
 		zap.String("session_id", sessionID),
@@ -3426,6 +3428,18 @@ func (s *Service) persistSessionModelAndRuntimeConfig(
 	availableModels []streams.SessionModelInfo,
 	options []streams.ConfigOption,
 ) {
+	s.persistSessionModelAndRuntimeConfigWithSettlement(
+		ctx, sessionID, model, mode, availableModels, options, false,
+	)
+}
+
+func (s *Service) persistSessionModelAndRuntimeConfigWithSettlement(
+	ctx context.Context,
+	sessionID, model, mode string,
+	availableModels []streams.SessionModelInfo,
+	options []streams.ConfigOption,
+	configOptionsSettled bool,
+) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for session model persistence",
@@ -3440,14 +3454,17 @@ func (s *Service) persistSessionModelAndRuntimeConfig(
 		s.persistSessionModelOnSession(ctx, sessionID, session, model)
 	}
 	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
-	s.persistSessionModelsSnapshot(ctx, sessionID, model, availableModels, options)
+	s.persistSessionModelsSnapshot(ctx, sessionID, session, model, availableModels, options, configOptionsSettled)
 }
 
 func (s *Service) persistSessionModelsSnapshot(
 	ctx context.Context,
-	sessionID, currentModelID string,
+	sessionID string,
+	session *models.TaskSession,
+	currentModelID string,
 	availableModels []streams.SessionModelInfo,
 	options []streams.ConfigOption,
+	configOptionsSettled bool,
 ) {
 	modelsForBoot := make([]streams.SessionModelInfo, 0, len(availableModels))
 	for _, model := range availableModels {
@@ -3459,9 +3476,13 @@ func (s *Service) persistSessionModelsSnapshot(
 		})
 	}
 	snapshot := lifecycle.SessionModelsSnapshot{
-		CurrentModelID: currentModelID,
-		Models:         modelsForBoot,
-		ConfigOptions:  options,
+		CurrentModelID:       currentModelID,
+		Models:               modelsForBoot,
+		ConfigOptions:        options,
+		ConfigOptionsSettled: configOptionsSettled,
+	}
+	if previous, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok {
+		snapshot.ConfigOptionsSettled = snapshot.ConfigOptionsSettled || previous.ConfigOptionsSettled
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	if err := s.repo.SetSessionMetadataKey(
