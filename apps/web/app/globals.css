@@ -15,7 +15,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono:
-    "Monaspace Neon", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    "Monaspace Neon", "Geist Mono", "NerdFontGlyphs", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, monospace;
   --font-mono-size: 12px;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -70,13 +71,119 @@
   --radius-4xl: var(--radius);
 }
 
+/* Powerline separators and Nerd Font icons, as carried by text copied from a
+   styled terminal prompt (Oh-My-Posh, Starship), live in the Unicode Private
+   Use Area. PUA codepoints have no script or language association, so the
+   platform's font-matching cannot resolve them the way it resolves CJK or
+   emoji: they render as notdef boxes unless a covering font is named
+   explicitly. This names one.
+
+   `local()` only, so nothing is downloaded and no font is redistributed. A
+   user who already has a Nerd Font installed (the same prerequisite their
+   terminal has) sees the real glyphs; a user without one is unaffected and
+   keeps today's behaviour. `unicode-range` confines this to the PUA, so every
+   other character still uses the UI typeface. Families mirror the presets in
+   `lib/terminal/terminal-font.ts`.
+
+   Every entry must be a FULL font name (family plus style, e.g. "... Regular")
+   or a PostScript name. `local()` does not match on family name alone:
+   `local("MesloLGS NF")` silently fails where `local("MesloLGS NF Regular")`
+   resolves. This is the opposite of the `font-family` property, which does
+   match families, and the mismatch is invisible at author time because a
+   failed `local()` simply falls through to the next source. */
+@font-face {
+  font-family: "NerdFontGlyphs";
+  src:
+    local("Symbols Nerd Font Regular"),
+    local("MesloLGS NF Regular"),
+    local("MesloLGS Nerd Font Regular"),
+    local("MesloLGM Nerd Font Regular"),
+    local("MesloLGL Nerd Font Regular"),
+    local("CaskaydiaCove Nerd Font Regular"),
+    local("CaskaydiaMono Nerd Font Regular"),
+    local("JetBrainsMono Nerd Font Regular"),
+    local("FiraCode Nerd Font Regular"),
+    local("Hack Nerd Font Regular"),
+    local("Iosevka Nerd Font Regular"),
+    local("IosevkaTerm Nerd Font Regular"),
+    local("SauceCodePro Nerd Font Regular"),
+    local("UbuntuMono Nerd Font Regular"),
+    local("RobotoMono Nerd Font Regular"),
+    local("DejaVuSansM Nerd Font Regular"),
+    local("3270 Nerd Font Regular"),
+    local("Agave Nerd Font Regular"),
+    local("AnonymicePro Nerd Font Regular"),
+    local("Arimo Nerd Font Regular"),
+    local("AurulentSansM Nerd Font Regular"),
+    local("BigBlueTerm437 Nerd Font Regular"),
+    local("BitstromWera Nerd Font Regular"),
+    local("BlexMono Nerd Font Regular"),
+    local("CodeNewRoman Nerd Font Regular"),
+    local("ComicShannsMono Nerd Font Regular"),
+    local("CommitMono Nerd Font Regular"),
+    local("Cousine Nerd Font Regular"),
+    local("D2CodingLigature Nerd Font Regular"),
+    local("DaddyTimeMono Nerd Font Regular"),
+    local("DroidSansM Nerd Font Regular"),
+    local("EnvyCodeR Nerd Font Regular"),
+    local("FantasqueSansM Nerd Font Regular"),
+    local("FiraMono Nerd Font Regular"),
+    local("GeistMono Nerd Font Regular"),
+    local("GoMono Nerd Font Regular"),
+    local("Gohu Nerd Font Regular"),
+    local("Hasklug Nerd Font Regular"),
+    local("HeavyData Nerd Font Regular"),
+    local("Hurmit Nerd Font Regular"),
+    local("iMWritingMono Nerd Font Regular"),
+    local("Inconsolata Nerd Font Regular"),
+    local("InconsolataGo Nerd Font Regular"),
+    local("InconsolataLGC Nerd Font Regular"),
+    local("IntoneMono Nerd Font Regular"),
+    local("Lekton Nerd Font Regular"),
+    local("LiterationMono Nerd Font Regular"),
+    local("Lilex Nerd Font Regular"),
+    local("MartianMono Nerd Font Regular"),
+    local("Monaspice Nerd Font Regular"),
+    local("Monofur Nerd Font Regular"),
+    local("Monoid Nerd Font Regular"),
+    local("Mononoki Nerd Font Regular"),
+    local("MPlus Nerd Font Regular"),
+    local("NotoMono Nerd Font Regular"),
+    local("OpenDyslexicM Nerd Font Regular"),
+    local("Overpass Nerd Font Regular"),
+    local("ProFont Nerd Font Regular"),
+    local("ProggyClean Nerd Font Regular"),
+    local("RecMono Nerd Font Regular"),
+    local("ShureTechMono Nerd Font Regular"),
+    local("SpaceMono Nerd Font Regular"),
+    local("Terminess Nerd Font Regular"),
+    local("Tinos Nerd Font Regular"),
+    local("UbuntuSans Nerd Font Regular"),
+    local("VictorMono Nerd Font Regular"),
+    local("ZedMono Nerd Font Regular"),
+    local("Cascadia Code"),
+    url("/fonts/nerd-symbols/nerd-symbols-subset.woff2") format("woff2");
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD;
+  /* Powerline separators are drawn to fill a full terminal cell, ascender to
+     descender, so at matching font-size their ink is ~1.99x the cap height of
+     the proportional UI face and they tower over the surrounding text.
+     Measured: 133 vs 67 at 100px. Scale them to roughly 1em so they read as
+     inline glyphs rather than oversized blocks. Applies only to this face,
+     which serves the Private Use Area alone. */
+  size-adjust: 75%;
+  font-display: swap;
+}
+
 :root {
   --app-status-bar-height: 0px;
-  --font-geist-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-sans: "Figtree", "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-geist-sans:
+    "Geist", "NerdFontGlyphs", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans:
+    "Figtree", "Geist", "NerdFontGlyphs", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
   --font-geist-mono:
-    "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+    "Geist Mono", "NerdFontGlyphs", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -919,8 +1026,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   color: var(--foreground);
   overflow-wrap: anywhere;
   font-family:
-    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji";
+    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, "NerdFontGlyphs",
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 .markdown-body h1,
@@ -1805,8 +1912,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 .chat-message-list {
   font-size: 13px;
   font-family:
-    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji";
+    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, "NerdFontGlyphs",
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 /* Shiki code block styling */
