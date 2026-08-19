@@ -333,6 +333,26 @@ function shouldStripPastedFormatting(clipboardData: DataTransfer): boolean {
   return !html.includes("data-pm-slice");
 }
 
+/**
+ * When the clipboard payload is a single hyperlink (e.g. a link copied from a
+ * browser page), return its href. Such a copy's plain text is often the link's
+ * title rather than the URL, so preferring the href preserves the real URL.
+ * Returns null when the payload is not exactly one link, so the caller falls
+ * back to the plain text. The parsed HTML is only read for its href attribute,
+ * never rendered.
+ */
+function singleLinkHref(html: string): string | null {
+  if (!html.includes("<a")) return null;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const anchors = doc.querySelectorAll("a[href]");
+  if (anchors.length !== 1) return null;
+  const href = anchors[0].getAttribute("href")?.trim();
+  if (!href) return null;
+  const payloadText = (doc.body.textContent ?? "").replace(/\s+/gu, " ").trim();
+  const linkText = (anchors[0].textContent ?? "").replace(/\s+/gu, " ").trim();
+  return payloadText === linkText ? href : null;
+}
+
 export function handleEditorPaste(
   view: import("@tiptap/pm/view").EditorView,
   event: ClipboardEvent,
@@ -365,15 +385,19 @@ export function handleEditorPaste(
     }
   }
 
-  // 3. Strip formatting from externally pasted rich content. Re-running the
-  // paste with just the plain text keeps a hyperlink's URL instead of the
-  // default parse's visible title. `pasteText` fires a synthetic empty-clipboard
-  // paste, so this handler re-enters once, no-ops, and ProseMirror inserts the
-  // text with its own inline/block handling.
-  if (text && clipboardData && shouldStripPastedFormatting(clipboardData)) {
-    event.preventDefault();
-    view.pasteText(text);
-    return true;
+  // 3. Strip formatting from externally pasted rich content. A single copied
+  // hyperlink pastes its href (the plain text is often the link title, not the
+  // URL); other rich content pastes as plain text. Either keeps the URL that the
+  // default HTML parse would otherwise drop. `pasteText` fires a synthetic
+  // empty-clipboard paste, so this handler re-enters once, no-ops, and
+  // ProseMirror inserts the text with its own inline/block handling.
+  if (clipboardData && shouldStripPastedFormatting(clipboardData)) {
+    const replacement = singleLinkHref(clipboardData.getData("text/html")) ?? text;
+    if (replacement) {
+      event.preventDefault();
+      view.pasteText(replacement);
+      return true;
+    }
   }
 
   return false;

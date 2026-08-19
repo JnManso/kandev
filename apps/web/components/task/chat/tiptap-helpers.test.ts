@@ -374,19 +374,30 @@ describe("handleEditorPaste formatting", () => {
     expect(preventDefault).toHaveBeenCalledOnce();
   });
 
-  it("pastes the plain-text URL when the clipboard holds a formatted browser link", () => {
+  it("extracts the href when the clipboard is a single formatted link", () => {
     const pasteText = vi.fn();
     const preventDefault = vi.fn();
     const url = "https://example.com/boards/sprint/42?workitem=1234";
     const event = htmlPasteEvent(
       `<a href="${url}">Example Board Sprint 42</a>`,
-      url,
+      "Example Board Sprint 42",
       preventDefault,
     );
 
     expect(runPaste(event, pasteText)).toBe(true);
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(pasteText).toHaveBeenCalledWith(url);
+  });
+
+  it("falls back to plain text when a link is embedded in other content", () => {
+    const pasteText = vi.fn();
+    const event = htmlPasteEvent(
+      '<p>see <a href="https://example.com/x">the board</a> here</p>',
+      "see the board here",
+    );
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith("see the board here");
   });
 
   it("strips formatting from external rich HTML, pasting only the plain text", () => {
