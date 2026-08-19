@@ -324,13 +324,14 @@ function insertCodeFenceNodes(
  * way Ctrl+Shift+V does. The chat composer has no link or styling marks, so the
  * default HTML parse keeps a browser hyperlink's visible title and silently
  * drops its URL. Copies made inside the editor (mentions, code blocks) carry
- * ProseMirror's `data-pm-slice` marker; those are left to the default handler
- * so their nodes round-trip.
+ * ProseMirror's `data-pm-slice` attribute; those are left to the default handler
+ * so their nodes round-trip. The check matches the attribute form
+ * (`data-pm-slice="`) so prose that merely mentions the token is still stripped.
  */
 function shouldStripPastedFormatting(clipboardData: DataTransfer): boolean {
   const html = clipboardData.getData("text/html");
   if (!html) return false;
-  return !html.includes("data-pm-slice");
+  return !html.includes('data-pm-slice="');
 }
 
 /**
@@ -374,28 +375,32 @@ export function handleEditorPaste(
     }
   }
 
-  // 2. Markdown code fence paste
   const text = clipboardData?.getData("text/plain");
-  if (text && text.includes("```")) {
-    const segments = parseCodeFences(text);
-    if (segments.some((s) => s.type === "code")) {
-      event.preventDefault();
-      insertCodeFenceNodes(view, segments);
-      return true;
-    }
-  }
 
-  // 3. Strip formatting from externally pasted rich content. A single copied
-  // hyperlink pastes its href (the plain text is often the link title, not the
-  // URL); other rich content pastes as plain text. Either keeps the URL that the
-  // default HTML parse would otherwise drop. `pasteText` fires a synthetic
-  // empty-clipboard paste, so this handler re-enters once, no-ops, and
-  // ProseMirror inserts the text with its own inline/block handling.
+  // 2. Strip formatting from externally pasted rich content. This runs before
+  // the code-fence branch so external HTML is not misread as a markdown code
+  // block. A single copied hyperlink pastes its href (the plain text is often
+  // the link title, not the URL); other rich content pastes as plain text.
+  // Either keeps the URL that the default HTML parse would otherwise drop.
+  // `pasteText` fires a synthetic empty-clipboard paste, so this handler
+  // re-enters once, no-ops, and ProseMirror inserts the text with its own
+  // inline/block handling.
   if (clipboardData && shouldStripPastedFormatting(clipboardData)) {
     const replacement = singleLinkHref(clipboardData.getData("text/html")) ?? text;
     if (replacement) {
       event.preventDefault();
       view.pasteText(replacement);
+      return true;
+    }
+  }
+
+  // 3. Markdown code fence paste (plain-text or internal pastes; external rich
+  // content was handled above).
+  if (text && text.includes("```")) {
+    const segments = parseCodeFences(text);
+    if (segments.some((s) => s.type === "code")) {
+      event.preventDefault();
+      insertCodeFenceNodes(view, segments);
       return true;
     }
   }
