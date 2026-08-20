@@ -201,15 +201,28 @@ dev: doctor
 	@exec $(BACKEND_DIR)/bin/kandev-launcher$(EXE) dev $(DEV_FLAGS)
 
 .PHONY: dev-prod-db
-# `?=`, not `:=`: a makefile assignment outranks the environment in GNU Make, so
-# `:=` overwrote a relocated install's KANDEV_DATABASE_PATH and pointed dev mode
-# at the untouched $HOME/.kandev default while the launcher still reported that
-# it had backed up the production db. The fallback chain mirrors the launcher's
-# own resolveDatabasePath/resolveHomeDir (apps/backend/internal/launcher/constants.go),
-# which likewise trims a blank KANDEV_HOME_DIR before using it.
-dev-prod-db: export KANDEV_DATABASE_PATH ?= $(or $(strip $(KANDEV_HOME_DIR)),$(HOME)/.kandev)/data/kandev.db
+# Resolve the production db the way the launcher would
+# (resolveDatabasePath/resolveHomeDir in apps/backend/internal/launcher/constants.go):
+# an environment KANDEV_DATABASE_PATH wins, then KANDEV_HOME_DIR, then
+# $HOME/.kandev. A plain makefile assignment outranks the environment in GNU
+# Make, so the earlier `:=` of the $HOME default ignored a relocated install and
+# ran dev mode against the wrong db while the launcher still reported backing up
+# the production one.
+#
+# `?=` does not express this either: Make counts a variable the shell exported
+# blank as defined, so `?=` would forward that blank onward and the launcher —
+# which trims before testing for empty — would quietly fall back to the isolated
+# .kandev-dev db while this target announced production.
+#
+# $(if $(strip …),…) tests emptiness on the trimmed value but substitutes the
+# original, so a blank falls through to the next source while a real path keeps
+# the internal spaces $(strip …) would otherwise collapse. Values are forwarded
+# as-is; the launcher trims its own leading/trailing whitespace.
+KANDEV_PROD_HOME_DIR := $(if $(strip $(KANDEV_HOME_DIR)),$(KANDEV_HOME_DIR),$(HOME)/.kandev)
+KANDEV_PROD_DB_PATH := $(if $(strip $(KANDEV_DATABASE_PATH)),$(KANDEV_DATABASE_PATH),$(KANDEV_PROD_HOME_DIR)/data/kandev.db)
+dev-prod-db: export KANDEV_DATABASE_PATH := $(KANDEV_PROD_DB_PATH)
 dev-prod-db:
-	@echo "⚠  dev mode against PRODUCTION db at $(KANDEV_DATABASE_PATH)"
+	@echo "⚠  dev mode against PRODUCTION db at $(KANDEV_PROD_DB_PATH)"
 	@$(MAKE) dev
 
 .PHONY: dev-backend

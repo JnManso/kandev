@@ -34,9 +34,9 @@ resolve() {
 expect_eq() {
 	local label=$1 want=$2 got=$3
 	if [ "$got" = "$want" ]; then
-		printf 'ok    %-21s %s\n' "$label" "$got"
+		printf 'ok    %-29s %s\n' "$label" "$got"
 	else
-		printf 'FAIL  %-21s\n        want: %s\n        got:  %s\n' "$label" "$want" "$got"
+		printf 'FAIL  %-29s\n        want: %s\n        got:  %s\n' "$label" "$want" "$got"
 		status=1
 	fi
 }
@@ -48,11 +48,11 @@ expect_suffix() {
 	case "$got" in
 	UNSET | "") ;;
 	*"$want")
-		printf 'ok    %-21s %s\n' "$label" "$got"
+		printf 'ok    %-29s %s\n' "$label" "$got"
 		return
 		;;
 	esac
-	printf 'FAIL  %-21s\n        want suffix: %s\n        got:         %s\n' \
+	printf 'FAIL  %-29s\n        want suffix: %s\n        got:         %s\n' \
 		"$label" "$want" "$got"
 	status=1
 }
@@ -76,6 +76,22 @@ expect_eq "KANDEV_DATABASE_PATH" 'D:\kandev-probe\data\custom.db' \
 #    rather than derive "   /data/kandev.db" from it.
 expect_suffix "blank KANDEV_HOME_DIR" "/.kandev/data/kandev.db" \
 	"$(resolve -u KANDEV_DATABASE_PATH 'KANDEV_HOME_DIR=   ')"
+
+# 5. An exported-but-empty KANDEV_DATABASE_PATH must not be forwarded. Make
+#    counts it as defined, so `?=` would keep the blank; the launcher trims it,
+#    finds nothing, and drops to the isolated .kandev-dev db — dev-prod-db would
+#    then announce production while opening the dev database.
+expect_eq "empty KANDEV_DATABASE_PATH" 'D:\kandev-probe/data/kandev.db' \
+	"$(resolve 'KANDEV_DATABASE_PATH=' 'KANDEV_HOME_DIR=D:\kandev-probe')"
+
+# 6. Same for a whitespace-only override, which the launcher also trims away.
+expect_eq "blank KANDEV_DATABASE_PATH" 'D:\kandev-probe/data/kandev.db' \
+	"$(resolve 'KANDEV_DATABASE_PATH=   ' 'KANDEV_HOME_DIR=D:\kandev-probe')"
+
+# 7. Internal whitespace is part of the path. $(strip …) collapses runs of
+#    spaces, so it may gate the emptiness test but must not supply the value.
+expect_eq "spaces inside KANDEV_HOME_DIR" 'D:\kandev  probe/data/kandev.db' \
+	"$(resolve -u KANDEV_DATABASE_PATH 'KANDEV_HOME_DIR=D:\kandev  probe')"
 
 if [ "$status" -eq 0 ]; then
 	echo "All dev-prod-db path checks passed (env db path > KANDEV_HOME_DIR > \$HOME/.kandev)."
