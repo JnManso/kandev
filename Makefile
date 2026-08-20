@@ -218,7 +218,7 @@ dev: doctor
 # original, so a blank falls through to the next source while a real path keeps
 # the internal spaces $(strip …) would otherwise collapse. Values are forwarded
 # as-is; the launcher trims its own leading/trailing whitespace.
-KANDEV_PROD_HOME_DIR := $(if $(strip $(KANDEV_HOME_DIR)),$(KANDEV_HOME_DIR),$(HOME)/.kandev)
+KANDEV_PROD_HOME_DIR := $(if $(strip $(KANDEV_HOME_DIR)),$(shell printf '%s' "$$KANDEV_HOME_DIR" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$$//'),$(HOME)/.kandev)
 KANDEV_PROD_DB_PATH := $(if $(strip $(KANDEV_DATABASE_PATH)),$(KANDEV_DATABASE_PATH),$(KANDEV_PROD_HOME_DIR)/data/kandev.db)
 dev-prod-db: export KANDEV_DATABASE_PATH := $(KANDEV_PROD_DB_PATH)
 dev-prod-db:

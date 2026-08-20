@@ -93,6 +93,12 @@ expect_eq "blank KANDEV_DATABASE_PATH" 'D:\kandev-probe/data/kandev.db' \
 expect_eq "spaces inside KANDEV_HOME_DIR" 'D:\kandev  probe/data/kandev.db' \
 	"$(resolve -u KANDEV_DATABASE_PATH 'KANDEV_HOME_DIR=D:\kandev  probe')"
 
+# 8. Leading and trailing padding around a nonblank home must be removed
+#    before the database suffix is appended. Otherwise the trailing spaces
+#    become internal path characters and survive the launcher's TrimSpace.
+expect_eq "padded KANDEV_HOME_DIR" 'D:\kandev-probe/data/kandev.db' \
+	"$(resolve -u KANDEV_DATABASE_PATH 'KANDEV_HOME_DIR=  D:\kandev-probe   ')"
+
 if [ "$status" -eq 0 ]; then
 	echo "All dev-prod-db path checks passed (env db path > KANDEV_HOME_DIR > \$HOME/.kandev)."
 fi
