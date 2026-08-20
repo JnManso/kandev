@@ -85,16 +85,29 @@
    other character still uses the UI typeface. Families mirror the presets in
    `lib/terminal/terminal-font.ts`.
 
-   Every entry must be a FULL font name (family plus style, e.g. "... Regular")
-   or a PostScript name. `local()` does not match on family name alone:
-   `local("MesloLGS NF")` silently fails where `local("MesloLGS NF Regular")`
-   resolves. This is the opposite of the `font-family` property, which does
-   match families, and the mismatch is invisible at author time because a
-   failed `local()` simply falls through to the next source. */
+   Every entry must be a FULL font name or a PostScript name. `local()` does
+   not match on family name alone: `local("MesloLGS NF")` silently fails where
+   `local("MesloLGS NF Regular")` resolves. This is the opposite of the
+   `font-family` property, which does match families, and the mismatch is
+   invisible at author time because a failed `local()` simply falls through to
+   the next source. Most patched families spell their full name as
+   "<family> Regular", but not all: the icons-only font reports "Symbols Nerd
+   Font" with PostScript name "SymbolsNF", so both are listed and neither
+   carries a style word.
+
+   Only fonts that actually cover these ranges may appear here. A resolved
+   `local()` commits the browser to that face for the whole `unicode-range`;
+   it does NOT fall through to the next source for individual missing glyphs.
+   Listing a font with partial or no coverage therefore preempts the bundled
+   subset and renders fewer glyphs than shipping nothing. Unpatched Cascadia
+   Code was listed here as a Windows "safety net" and had to be removed for
+   exactly this reason: it covers 0 of the powerline, seti, devicon and
+   octicon codepoints this face is scoped to. */
 @font-face {
   font-family: "NerdFontGlyphs";
   src:
-    local("Symbols Nerd Font Regular"),
+    local("Symbols Nerd Font"),
+    local("SymbolsNF"),
     local("MesloLGS NF Regular"),
     local("MesloLGS Nerd Font Regular"),
     local("MesloLGM Nerd Font Regular"),
@@ -161,7 +174,6 @@
     local("UbuntuSans Nerd Font Regular"),
     local("VictorMono Nerd Font Regular"),
     local("ZedMono Nerd Font Regular"),
-    local("Cascadia Code"),
     url("/fonts/nerd-symbols/nerd-symbols-subset.woff2") format("woff2");
   unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD;
   /* Powerline separators are drawn to fill a full terminal cell, ascender to

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: building
 created: 2026-08-19
 owner: jnmanso
 ---
@@ -48,7 +48,13 @@ font to see powerline glyphs; installing the font is not sufficient.
   glyph shapes differ between families and the closest match to the user's
   terminal is preferred: icons-only `Symbols`, then the Meslo variants that Oh
   My Posh and Powerlevel10k recommend, then common programming faces, then the
-  remainder, with the non-Nerd `Cascadia Code` last as a Windows safety net.
+  remainder.
+- Only Nerd Font patched faces SHALL be listed. A resolved `local()` commits
+  the browser to that face for the entire `unicode-range` and does not fall
+  through per glyph, so an unpatched base font preempts the bundled subset and
+  renders fewer glyphs than listing nothing at all. Unpatched `Cascadia Code`
+  was listed as a Windows safety net and removed for this reason: it covers 0
+  of the powerline, seti, devicon and octicon codepoints.
 - Patched family names are not derivable from the original typeface
   (`Source Code Pro` becomes `SauceCodePro`, `Cascadia Code` becomes
   `CaskaydiaCove`, `IBM Plex Mono` becomes `BlexMono`), so the catalogue is
