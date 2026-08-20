@@ -23,15 +23,14 @@ under the `icons` category, wired only to the terminal panel's
 
 ## Acceptance
 
-- `@font-face` named `NerdFontGlyphs` in the shared theme font catalog,
-  `unicode-range` scoped to
-  `U+E000-F8FF`, `U+F0000-FFFFD`, `U+100000-10FFFD`, carrying `size-adjust`.
-- `src` names every Nerd Font family by its full and PostScript aliases from
-  the pinned v3.5.0 release, ordered by intent, with the bundled subset last
-  so an installed font wins and no download occurs.
+- `NerdFontLocalGlyphs` covers all three PUA ranges and names every Nerd Font
+  family by its full and PostScript aliases from the pinned v3.5.0 release.
+- `NerdFontBundledGlyphs` uses only the content-hashed bundled URL and declares
+  only ranges in the subset's actual character map.
 - Bundled subset committed under `apps/web/public/fonts/nerd-symbols/` with its
   MIT licence, served from the app's own origin.
-- Family present in `--font-sans` and `--font-mono`, after the UI typefaces.
+- Local and bundled families present in that order in every application font
+  stack, after the UI typefaces.
 - No text-processing code anywhere: bytes to the backend and agent unchanged.
 
 ## Verification
@@ -50,10 +49,11 @@ the fallback.
 - `apps/packages/theme/src/fonts.css`
 - `apps/web/app/globals.css`
 - `apps/web/app/globals-font-fallback.test.ts`
-- `apps/web/public/fonts/nerd-symbols/nerd-symbols-subset.woff2`
+- `apps/web/public/fonts/nerd-symbols/nerd-symbols-subset-bca747e8.woff2`
 - `apps/web/public/fonts/nerd-symbols/LICENSE`
 
 ## Output Contract
 
-Report the ranges declared, the resolution order, the subset size and coverage,
-tests run, and confirmation that no text-processing code was introduced.
+Report both faces, the declared ranges, the resolution order, the subset size
+and coverage, tests run, and confirmation that no text-processing code was
+introduced.

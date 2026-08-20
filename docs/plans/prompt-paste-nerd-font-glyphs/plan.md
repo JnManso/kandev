@@ -7,10 +7,11 @@ status: done
 # Implementation Plan: Render Nerd Font glyphs pasted from a styled terminal
 
 ## Overview
-Map Private Use Area codepoints to a Nerd Font through a `unicode-range` scoped
-`@font-face`, preferring one the user already has and falling back to a small
-subset shipped by Kandev. CSS and one font asset. No text is modified on any
-path, so the bytes reaching the backend and the agent are unchanged.
+Map Private Use Area codepoints through two `unicode-range` scoped font faces.
+The first face uses an installed Nerd Font. The second face uses a small subset
+that Kandev ships. Separate families preserve per-character fallback when a
+selected local font lacks one glyph. CSS and one font asset change. No text is
+modified, so the bytes that reach the backend and the agent are unchanged.
 
 ## Confirmed root cause
 The paste pipeline was never broken. TipTap, the WebSocket, SQLite and the
@@ -61,19 +62,20 @@ CSS, and both are silent failures.
    user's terminal is preferred.
 
 ## Approach
-1. `@font-face` named `NerdFontGlyphs` in `apps/packages/theme/src/fonts.css`, scoped by
-   `unicode-range` to the three PUA ranges, with `size-adjust: 75%` to bring
-   the ~1.99x-cap-height separators down to roughly 1em.
-2. `src` lists the full and PostScript aliases for the 66 Nerd Font families
-   in the v3.5.0 release, ordered by intent, followed last by the bundled
-   subset. The aliases come from the regular face name tables, not guessed
-   family names.
+1. `NerdFontLocalGlyphs` in `apps/packages/theme/src/fonts.css` covers all
+   three PUA ranges. Its `src` lists the full and PostScript aliases for the 66
+   Nerd Font families in the v3.5.0 release, ordered by intent.
+2. `NerdFontBundledGlyphs` contains only the bundled URL. Its `unicode-range`
+   matches the subset's actual character map, so unsupported PUA codepoints do
+   not cause a download that cannot render them.
 3. Bundled subset generated from the MIT-licensed `SymbolsNerdFont-Regular`
    v3.5.0 with `fontTools`, restricted to the four icon sets a prompt uses, and
-   committed with its licence at
+   committed with its licence and a content-hashed filename at
    `apps/web/public/fonts/nerd-symbols/`.
-4. Family inserted into `--font-sans` and `--font-mono` after the UI typefaces.
-5. Guard test covering the properties that silently regress.
+4. Both families carry `size-adjust: 75%`. Every font stack puts the local face
+   before the bundled face and puts both after the UI typefaces.
+5. A guard test covers source separation, range accuracy, cache-safe naming,
+   and stack order.
 
 ### Subset size curve (measured, woff2)
 
@@ -88,8 +90,8 @@ CSS, and both are silent failures.
 | entire BMP PUA | 583 KB |
 
 Font Awesome doubles the payload for icons prompts rarely draw, so the cut is
-after devicons. The face is `unicode-range` scoped, so this is fetched only
-when a Private Use codepoint is rendered.
+after devicons. The bundled face declares its exact character map, so it is
+fetched only when a codepoint that the file supports is rendered.
 
 ## Tasks
 - `task-01-pua-font-fallback.md` — shared theme font catalog, bundled subset,
@@ -115,6 +117,9 @@ Measured against the running app rather than asserted:
 ## Risks
 - A Nerd Font outside the catalogue falls through to the bundled subset, so
   common glyphs still render but family-specific ones may not.
+- The first installed local source still wins. If it lacks one glyph, the
+  separate bundled family can render that character. The browser cannot try a
+  second installed source from the same `src` list for that character.
 - Glyphs outside the subset (plane-15 Material Design, Font Awesome) remain
   notdef for users with no Nerd Font. Widening requires regenerating the
   subset from the pinned source archive and updating the CSS coverage and
@@ -134,8 +139,10 @@ After extracting `SymbolsNerdFont-Regular.ttf`, regenerate the file with:
 python -m fontTools.subset SymbolsNerdFont-Regular.ttf \
   --unicodes="U+E0A0-E0D4,U+F400-F533,U+E5FA-E6B7,U+E700-E8EF" \
   --flavor=woff2 \
-  --output-file=apps/web/public/fonts/nerd-symbols/nerd-symbols-subset.woff2
+  --output-file=apps/web/public/fonts/nerd-symbols/nerd-symbols-subset-bca747e8.woff2
 ```
 
 The committed WOFF2 SHA-256 is
 `bca747e8daab16b628ebbc40bf67cd3ac961c143a40f794b9951c3f4e31e0618`.
+The filename uses the first eight hash characters because static assets have a
+one-year immutable cache policy.

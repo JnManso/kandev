@@ -34,10 +34,10 @@ font to see powerline glyphs; installing the font is not sufficient.
   back to a subset shipped by Kandev when they have none.
 
 ### Font resolution order
-- The `@font-face` SHALL list `local()` sources for the full Nerd Fonts
-  catalogue (66 patched families), followed last by a `url()` source for the
-  bundled subset. `src` is a prioritised list, so an installed font wins and no
-  download occurs.
+- A local-only face SHALL list `local()` sources for the full Nerd Fonts
+  catalogue (66 patched families). A separate bundled-only face SHALL contain
+  the `url()` source. Every application font stack SHALL put the local face
+  before the bundled face, so an installed font wins and no download occurs.
 - Every `local()` entry SHALL name a **full font name** (family plus style, for
   example `MesloLGS Nerd Font Regular`) or a PostScript name. `local()` does
   not match family names: `local("MesloLGS")` fails silently where
@@ -49,12 +49,12 @@ font to see powerline glyphs; installing the font is not sufficient.
   terminal is preferred: icons-only `Symbols`, then the Meslo variants that Oh
   My Posh and Powerlevel10k recommend, then common programming faces, then the
   remainder.
-- Only Nerd Font patched faces SHALL be listed. A resolved `local()` commits
-  the browser to that face for the entire `unicode-range` and does not fall
-  through per glyph, so an unpatched base font preempts the bundled subset and
-  renders fewer glyphs than listing nothing at all. Unpatched `Cascadia Code`
-  was listed as a Windows safety net and removed for this reason: it covers 0
-  of the powerline, seti, devicon and octicon codepoints.
+- Only Nerd Font patched faces SHALL be listed. Within one `src` list, a
+  resolved local resource does not retry the later URL for a missing glyph.
+  Separate font families let the browser continue from the selected local
+  resource to the bundled face for each missing character. Unpatched
+  `Cascadia Code` was listed as a Windows safety net and removed because it
+  covers 0 of the powerline, seti, devicon and octicon codepoints.
 - Distributions of the same family may use different names, so covering the
   Nerd Fonts release alone is not sufficient. Powerlevel10k ships its own
   MesloLGS build, the most common way a styled-prompt user acquires a patched
@@ -73,23 +73,31 @@ font to see powerline glyphs; installing the font is not sufficient.
 - The subset SHALL cover powerline separators (`U+E0A0-E0D4`), octicons
   (`U+F400-F533`), seti/custom file and folder icons (`U+E5FA-E6B7`), and
   devicons (`U+E700-E8EF`): the four sets an Oh My Posh prompt actually draws.
+- The bundled face SHALL declare the subset's actual character map, including
+  gaps in the powerline range. An unsupported PUA codepoint SHALL NOT start a
+  download that cannot render it. The local face SHALL keep all three PUA
+  ranges so an installed font can render glyphs outside the subset.
 - The subset SHALL be served from the application's own origin, never a
   third-party CDN, which would leak that a user pasted terminal output and add
   a runtime dependency on someone else's uptime.
-- Because the face is `unicode-range` scoped, the browser fetches it only when
-  a Private Use codepoint is actually rendered. A user who never pastes
-  terminal output downloads nothing.
+- The subset filename SHALL contain the first eight characters of its SHA-256
+  hash. Kandev serves static assets with a one-year immutable cache policy, so
+  a changed binary SHALL use a changed URL.
+- Because the bundled face declares its exact `unicode-range`, the browser
+  fetches it only when a supported PUA codepoint needs that face. A user who
+  never renders supported PUA text downloads nothing.
 
 ### Stack coverage
-- The glyph family SHALL be present in every font stack the stylesheet
-  declares, not only the `--font-sans` and `--font-mono` variables.
+- The local and bundled glyph families SHALL be present in that order in every
+  font stack the stylesheet declares, not only the `--font-sans` and
+  `--font-mono` variables.
   `.markdown-body` (rendered markdown across chat, PR and changelog) and
   `.chat-message-list` hardcode their own families rather than reading the
   variables, so a fix applied only to the variables leaves sent messages and
   agent output rendering notdef while the composer renders glyphs.
 
 ### Sizing
-- The face SHALL carry a `size-adjust` descriptor. Powerline separators are
+- Both faces SHALL carry a `size-adjust` descriptor. Powerline separators are
   drawn to fill a full terminal cell, ascender to descender, measuring ~1.99x
   the cap height of the UI typeface, and read as oversized blocks beside
   proportional text.
@@ -111,14 +119,18 @@ font to see powerline glyphs; installing the font is not sufficient.
   never fetched by users who paste no PUA text.
 - **No Nerd Font installed, glyph outside the subset.** Notdef box, as today.
   Affects the plane-15 Material Design range (`U+F0000-FFFFD`) and the Font
-  Awesome block, both excluded to keep the download small. Widening requires
-  regenerating the subset from the pinned source archive and updating its
-  recorded hash.
+  Awesome block, both excluded to keep the download small. The browser does
+  not fetch the subset for these unsupported codepoints. Widening requires
+  regenerating the subset from the pinned source archive, changing the hashed
+  filename, and updating its recorded hash.
+- **An installed Nerd Font lacks one requested glyph.** The browser continues
+  to the separate bundled family for that character. One combined `src` list
+  would stop at the selected local resource instead.
 - **A Nerd Font installed that is absent from the catalogue.** The local
   sources miss, and resolution falls through to the bundled subset, so the
   common glyphs still render.
 - **A font in the stack claims a PUA codepoint unexpectedly.** `unicode-range`
-  scoping confines the face to the PUA, so no ordinary text can change
+  scoping confines both faces to the PUA, so no ordinary text can change
   appearance.
 
 ## Scenarios
@@ -137,9 +149,9 @@ font to see powerline glyphs; installing the font is not sufficient.
   it is rendered, **THEN** it uses the existing UI typeface with unchanged
   metrics.
 - **GIVEN** a maintainer edits the rule, **WHEN** a `local()` entry is reduced
-  to a family name, the bundled source is moved ahead of the local sources, the
-  `url()` is pointed at a third-party origin, or a Private Use range or
-  `size-adjust` is dropped, **THEN** the guard test fails.
+  to a family name, the bundled family is moved ahead of the local family, the
+  `url()` loses its content hash, the bundled range exceeds its character map,
+  or `size-adjust` is dropped, **THEN** the guard test fails.
 
 ## Out of scope
 - Shipping a complete Nerd Font. Only the icons-only subset is bundled, and
