@@ -39,9 +39,9 @@ font to see powerline glyphs; installing the font is not sufficient.
   bundled subset. `src` is a prioritised list, so an installed font wins and no
   download occurs.
 - Every `local()` entry SHALL name a **full font name** (family plus style, for
-  example `MesloLGS NF Regular`) or a PostScript name. `local()` does not match
-  family names: `local("MesloLGS NF")` fails silently where
-  `local("MesloLGS NF Regular")` resolves. This is the inverse of the
+  example `MesloLGS Nerd Font Regular`) or a PostScript name. `local()` does
+  not match family names: `local("MesloLGS")` fails silently where
+  `local("MesloLGS Nerd Font Regular")` resolves. This is the inverse of the
   `font-family` property and the failure is invisible, since an unmatched
   source simply falls through.
 - Ordering SHALL express intent rather than alphabetical accident, because
@@ -104,8 +104,9 @@ font to see powerline glyphs; installing the font is not sufficient.
   never fetched by users who paste no PUA text.
 - **No Nerd Font installed, glyph outside the subset.** Notdef box, as today.
   Affects the plane-15 Material Design range (`U+F0000-FFFFD`) and the Font
-  Awesome block, both excluded to keep the download small. Widening is a
-  one-line change to the subset ranges.
+  Awesome block, both excluded to keep the download small. Widening requires
+  regenerating the subset from the pinned source archive and updating its
+  recorded hash.
 - **A Nerd Font installed that is absent from the catalogue.** The local
   sources miss, and resolution falls through to the bundled subset, so the
   common glyphs still render.

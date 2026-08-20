@@ -5,12 +5,14 @@ import { describe, expect, it } from "vitest";
 const GLYPH_FAMILY = "NerdFontGlyphs";
 
 const css = readFileSync(join(__dirname, "globals.css"), "utf8");
+const themeCss = readFileSync(join(__dirname, "../../packages/theme/src/fonts.css"), "utf8");
 
 // Slice to the rule's closing brace rather than a fixed character budget: a
 // fixed window silently truncates as the rule grows, which already caused a
 // descriptor to read as absent when it was present.
-const faceStart = css.indexOf("@font-face");
-const fontFace = css.slice(faceStart, css.indexOf("}", faceStart) + 1);
+const faceNameStart = themeCss.indexOf(`font-family: "${GLYPH_FAMILY}"`);
+const faceStart = themeCss.lastIndexOf("@font-face", faceNameStart);
+const fontFace = themeCss.slice(faceStart, themeCss.indexOf("}", faceNameStart) + 1);
 
 /** The first real font stack declared for `name`, sliced to its terminating
  *  semicolon.
@@ -33,7 +35,7 @@ const declaration = (name: string) => {
 
 describe("Nerd Font PUA glyph fallback", () => {
   it("declares a font-face for the private use area", () => {
-    expect(css).toContain(GLYPH_FAMILY);
+    expect(themeCss).toContain(GLYPH_FAMILY);
     expect(fontFace).toContain("@font-face");
   });
 
@@ -69,20 +71,34 @@ describe("Nerd Font PUA glyph fallback", () => {
   it("names every source by full font name, not by family name", () => {
     // `local()` matches a full font name or PostScript name only. A family
     // name silently fails and falls through to the next source, so an entry
-    // like local("MesloLGS NF") looks correct and renders nothing. Verified
-    // against Chromium: "MesloLGS NF" fails, "MesloLGS NF Regular" resolves.
+    // like local("MesloLGS") looks correct and renders nothing. Verified
+    // against Chromium: "MesloLGS" fails, "MesloLGS Nerd Font Regular" resolves.
     const sources = [...fontFace.matchAll(/local\("([^"]+)"\)/g)].map((m) => m[1]);
 
     expect(sources.length).toBeGreaterThan(1);
     for (const source of sources) {
-      // Most patched families spell their full name as "<family> Regular".
-      // The icons-only font is the documented exception: it reports full name
-      // "Symbols Nerd Font" and PostScript name "SymbolsNF", verified by
-      // reading the shipped subset's name table.
-      const hasStyleSuffix = /\b(Regular|Mono|Book|Medium)$/.test(source);
-      const isKnownStyleless = source === "Symbols Nerd Font" || source === "SymbolsNF";
-      expect(hasStyleSuffix || isKnownStyleless).toBe(true);
+      // Nerd Fonts v3.5.0 uses both full names ("Nerd Font") and PostScript
+      // aliases ("NF", "NFM", or "NFP"). A bare family name matches neither.
+      const isFullName = source.includes("Nerd Font");
+      const isPostScriptName = /(?:NF|NFM|NFP)(?:[- ]|$)/.test(source);
+      expect(isFullName || isPostScriptName).toBe(true);
     }
+  });
+
+  it("uses the upstream names for families whose aliases are not predictable", () => {
+    const sources = [...fontFace.matchAll(/local\("([^"]+)"\)/g)].map((m) => m[1]);
+    const required = [
+      "CaskaydiaCove NF Regular",
+      "CaskaydiaCoveNF-Regular",
+      "JetBrainsMono NF Regular",
+      "JetBrainsMonoNF-Regular",
+      "BigBlueTerm437 Nerd Font",
+      "BigBlueTerm437NF",
+      "D2KodingLigature Nerd Font",
+      "D2KodingLigatureNF",
+    ];
+
+    for (const source of required) expect(sources).toContain(source);
   });
 
   it("lists only Nerd Font patched faces, never an unpatched base font", () => {
@@ -94,7 +110,7 @@ describe("Nerd Font PUA glyph fallback", () => {
     const sources = [...fontFace.matchAll(/local\("([^"]+)"\)/g)].map((m) => m[1]);
 
     for (const source of sources) {
-      const isPatched = /Nerd Font|\bNF\b/.test(source) || source === "SymbolsNF";
+      const isPatched = source.includes("Nerd Font") || /(?:NF|NFM|NFP)(?:[- ]|$)/.test(source);
       expect(isPatched, `${source} is not a Nerd Font patched face`).toBe(true);
     }
   });
@@ -109,7 +125,7 @@ describe("Nerd Font PUA glyph fallback", () => {
     // Powerline separators fill a full terminal cell, so unscaled they render
     // at roughly twice the cap height of the UI face. Measured 1.99x before
     // this descriptor, 1.43x after.
-    expect(fontFace).toMatch(/size-adjust:\s*\d+%/);
+    expect(fontFace).toContain("size-adjust: 75%");
   });
 
   it("is reachable from every font stack in the stylesheet", () => {
@@ -117,7 +133,7 @@ describe("Nerd Font PUA glyph fallback", () => {
     // .chat-message-list hardcode their own families instead of reading the
     // variables, so rendered chat messages kept showing notdef boxes while the
     // composer rendered glyphs. Scan every stack rather than a chosen few.
-    const outsideFontFace = css.slice(0, faceStart) + css.slice(css.indexOf("}", faceStart));
+    const outsideFontFace = css;
     const stacks = [...outsideFontFace.matchAll(/(?:font-family|--font-[a-z-]+):\s*([^;]+);/g)]
       .map((m) => ({ value: m[1].replace(/\s+/g, " ").trim() }))
       .filter((s) => !s.value.startsWith("var(") && /[,]/.test(s.value));

@@ -24,7 +24,7 @@ and the browser draws notdef. An explicitly named covering font is the only
 mechanism that works.
 
 `--font-sans` was `"Figtree", "Geist", ui-sans-serif, ...` with no `@font-face`
-or `unicode-range` rule anywhere in `globals.css`. Kandev's Nerd Font presets
+or `unicode-range` rule anywhere in the shared theme font catalog. Kandev's Nerd Font presets
 in `lib/terminal/terminal-font.ts` were wired only to `terminalFontFamily` and
 referenced by zero chat components.
 
@@ -49,11 +49,11 @@ Both were discovered by testing in a real browser rather than by reading the
 CSS, and both are silent failures.
 
 1. **`local()` does not match family names.** The first implementation named
-   families (`local("MesloLGS NF")`) and rendered nothing at all. `local()`
+   families (`local("MesloLGS")`) and rendered nothing at all. `local()`
    matches a full font name or PostScript name only. Measured in Chromium
-   against an installed font: `local("MesloLGS NF")` produces notdef,
-   `local("MesloLGS NF Regular")` produces the glyph. An unmatched source falls
-   through silently, so the rule looks correct and does nothing.
+   against an installed font: `local("MesloLGS")` produces notdef,
+   `local("MesloLGS Nerd Font Regular")` produces the glyph. An unmatched
+   source falls through silently, so the rule looks correct and does nothing.
 2. **Ordering decided the winner arbitrarily.** Pasting the catalogue in
    alphabetical order handed the match to `MesloLGL` over `MesloLGS` purely on
    sort position. Harmless there (identical outlines) but wrong in general,
@@ -61,11 +61,13 @@ CSS, and both are silent failures.
    user's terminal is preferred.
 
 ## Approach
-1. `@font-face` named `NerdFontGlyphs` in `apps/web/app/globals.css`, scoped by
+1. `@font-face` named `NerdFontGlyphs` in `apps/packages/theme/src/fonts.css`, scoped by
    `unicode-range` to the three PUA ranges, with `size-adjust: 75%` to bring
    the ~1.99x-cap-height separators down to roughly 1em.
-2. `src` lists 68 `local()` entries covering all 66 Nerd Font families by full
-   font name, ordered by intent, followed last by the bundled subset.
+2. `src` lists the full and PostScript aliases for the 66 Nerd Font families
+   in the v3.5.0 release, ordered by intent, followed last by the bundled
+   subset. The aliases come from the regular face name tables, not guessed
+   family names.
 3. Bundled subset generated from the MIT-licensed `SymbolsNerdFont-Regular`
    v3.5.0 with `fontTools`, restricted to the four icon sets a prompt uses, and
    committed with its licence at
@@ -74,6 +76,7 @@ CSS, and both are silent failures.
 5. Guard test covering the properties that silently regress.
 
 ### Subset size curve (measured, woff2)
+
 | Ranges | Size |
 |---|---|
 | powerline only | 7 KB |
@@ -89,7 +92,7 @@ after devicons. The face is `unicode-range` scoped, so this is fetched only
 when a Private Use codepoint is rendered.
 
 ## Tasks
-- `task-01-pua-font-fallback.md` — `apps/web/app/globals.css`, bundled subset,
+- `task-01-pua-font-fallback.md` — shared theme font catalog, bundled subset,
   guard test
 
 ## Validation
@@ -102,7 +105,7 @@ pnpm lint
 
 Measured against the running app rather than asserted:
 - `U+E0B0`, `U+F418`, `U+E5FF` render the installed glyph, not notdef.
-- Winner is `MesloLGS NF Regular`, matching the terminal's own font.
+- Winner is `MesloLGS Nerd Font Regular`, matching the terminal's own font.
 - Bundled subset alone (no `local()`) renders powerline, git branch, folder and
   devicon glyphs, proving the path for users with no Nerd Font.
 - Separator drops from 1.99x to ~1.43x cap height under `size-adjust`.
@@ -113,7 +116,26 @@ Measured against the running app rather than asserted:
 - A Nerd Font outside the catalogue falls through to the bundled subset, so
   common glyphs still render but family-specific ones may not.
 - Glyphs outside the subset (plane-15 Material Design, Font Awesome) remain
-  notdef for users with no Nerd Font. Widening is a one-line range change at a
-  known size cost, tabulated above.
+  notdef for users with no Nerd Font. Widening requires regenerating the
+  subset from the pinned source archive and updating the CSS coverage and
+  recorded output hash. The measured size cost is tabulated above.
 - CSS has no unit-testable logic, so the guard asserts the declaration's shape.
   Rendering was verified by measuring glyph advance widths in a real browser.
+
+## Reproducible subset source
+
+The bundled file uses `NerdFontsSymbolsOnly.zip` from Nerd Fonts v3.5.0. The
+source archive SHA-256 is
+`49362450cd61b32c7d1dadbb98e82696d77cc215344636d25eabc8a82d6f8d7f`.
+
+After extracting `SymbolsNerdFont-Regular.ttf`, regenerate the file with:
+
+```bash
+python -m fontTools.subset SymbolsNerdFont-Regular.ttf \
+  --unicodes="U+E0A0-E0D4,U+F400-F533,U+E5FA-E6B7,U+E700-E8EF" \
+  --flavor=woff2 \
+  --output-file=apps/web/public/fonts/nerd-symbols/nerd-symbols-subset.woff2
+```
+
+The committed WOFF2 SHA-256 is
+`bca747e8daab16b628ebbc40bf67cd3ac961c143a40f794b9951c3f4e31e0618`.
