@@ -125,6 +125,12 @@
     local("SymbolsNF"),
     local("MesloLGS Nerd Font Regular"),
     local("MesloLGSNF-Regular"),
+    /* Powerlevel10k ships its own MesloLGS build under different names than the
+       Nerd Fonts v3.5.0 release, and it is the most common way a styled-prompt
+       user acquires a patched font. Verified from that file's name table:
+       full name "MesloLGS NF Regular", PostScript "MesloLGS-NF-Regular". */
+      local("MesloLGS NF Regular"),
+    local("MesloLGS-NF-Regular"),
     local("MesloLGM Nerd Font Regular"),
     local("MesloLGMNF-Regular"),
     local("MesloLGL Nerd Font Regular"),

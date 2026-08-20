@@ -55,6 +55,13 @@ font to see powerline glyphs; installing the font is not sufficient.
   renders fewer glyphs than listing nothing at all. Unpatched `Cascadia Code`
   was listed as a Windows safety net and removed for this reason: it covers 0
   of the powerline, seti, devicon and octicon codepoints.
+- Distributions of the same family may use different names, so covering the
+  Nerd Fonts release alone is not sufficient. Powerlevel10k ships its own
+  MesloLGS build, the most common way a styled-prompt user acquires a patched
+  font, declaring full name `MesloLGS NF Regular` and PostScript
+  `MesloLGS-NF-Regular`, where the v3.5.0 release file for the same family
+  declares `MesloLGS Nerd Font Regular` / `MesloLGSNF-Regular`. Both are
+  listed.
 - Patched family names are not derivable from the original typeface
   (`Source Code Pro` becomes `SauceCodePro`, `Cascadia Code` becomes
   `CaskaydiaCove`, `IBM Plex Mono` becomes `BlexMono`), so the catalogue is
