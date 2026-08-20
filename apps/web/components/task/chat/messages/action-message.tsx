@@ -25,6 +25,7 @@ import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
+import { hasSuccessfulAgentBootAfter } from "@/hooks/processed-message-filtering";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   archive: IconArchive,
@@ -56,6 +57,11 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // Local state on the card would reset on that remount and the recovery banner
   // would reappear until the next user message.
   const [recoveryRequested, setRecoveryRequested] = useState(false);
+  // Durable counterpart to the click acknowledgment: the transcript itself
+  // records that the agent booted again after this failure. It survives a
+  // reload or task switch and also covers auto-resume-on-open, where the card
+  // would otherwise linger until the next prompt flipped the session to RUNNING.
+  const agentRebooted = useAgentRebootedAfterMessage(comment);
 
   if (metadata?.action_visibility === "running") {
     if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
@@ -81,7 +87,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={comment.task_id}
-      recoveryRequested={recoveryRequested}
+      recoveryResolved={recoveryRequested || agentRebooted}
       onRecoveryRequested={() => setRecoveryRequested(true)}
     />
   );
@@ -93,7 +99,7 @@ function SettledActionMessage({
   sessionError,
   sessionState,
   taskId,
-  recoveryRequested,
+  recoveryResolved,
   onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
@@ -101,7 +107,7 @@ function SettledActionMessage({
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
-  recoveryRequested: boolean;
+  recoveryResolved: boolean;
   onRecoveryRequested: () => void;
 }) {
   // A retry card is persisted against the failed turn, so hide it while the
@@ -119,7 +125,7 @@ function SettledActionMessage({
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={taskId}
-      recoveryRequested={recoveryRequested}
+      recoveryResolved={recoveryResolved}
       onRecoveryRequested={onRecoveryRequested}
     />
   );
@@ -131,7 +137,7 @@ function SettledFailureMessage({
   sessionError,
   sessionState,
   taskId,
-  recoveryRequested,
+  recoveryResolved,
   onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
@@ -139,14 +145,16 @@ function SettledFailureMessage({
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
-  recoveryRequested: boolean;
+  recoveryResolved: boolean;
   onRecoveryRequested: () => void;
 }) {
-  // A waiting session can still need recovery, so only hide this persisted
-  // card after its own Resume request is acknowledged (or the session starts).
-  // `recoveryRequested` is owned by ActionMessage so the acknowledgment
-  // survives the isSessionActive unmount above during a resume.
-  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryRequested))
+  // A waiting session can still need recovery, so only hide this persisted card
+  // once its own recovery resolved: either the Resume click was acknowledged or
+  // the transcript shows the agent booted again after this failure. A resumed
+  // agent settles at WAITING_FOR_INPUT, which isSessionActive deliberately
+  // excludes, so without that second signal the card outlives the failure it
+  // describes.
+  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryResolved))
     return null;
 
   const specialRecovery = renderSpecialRecovery({
@@ -407,6 +415,20 @@ function ProviderQuotaRecovery({
         </div>
       </div>
     </section>
+  );
+}
+
+/** Reads the session transcript for a successful agent boot newer than this
+ *  message. Selecting the derived boolean (not the array) keeps the memoized
+ *  message row from re-rendering on every streamed token. */
+function useAgentRebootedAfterMessage(comment: Message): boolean {
+  return useAppStore((state) =>
+    comment.session_id
+      ? hasSuccessfulAgentBootAfter(
+          state.messages.bySession[comment.session_id],
+          comment.created_at,
+        )
+      : false,
   );
 }
 

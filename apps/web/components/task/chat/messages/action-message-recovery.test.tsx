@@ -1,0 +1,134 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { StateProvider } from "@/components/state-provider";
+import { ActionMessage } from "./action-message";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type Message,
+  type TaskSession,
+  type TaskSessionState,
+} from "@/lib/types/http";
+import type { AppState } from "@/lib/state/store";
+
+// These specs never activate a button, so the recovery request never leaves the
+// client; a null client keeps the real WS module out of the test entirely.
+vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => null }));
+
+afterEach(cleanup);
+
+const RECOVERY_MESSAGE = "Agent encountered an error";
+const RESUME_TEST_ID = "recovery-resume-button";
+const FRESH_TEST_ID = "recovery-fresh-button";
+const TEST_SESSION_ID = "sess-1";
+const TEST_TASK_ID = "task-1";
+const FAILED_AT = "2026-05-30T00:00:00Z";
+const BOOTED_AFTER_FAILURE = "2026-05-30T00:01:00Z";
+const BOOTED_BEFORE_FAILURE = "2026-05-29T23:59:00Z";
+
+function recoveryMessage(): Message {
+  return {
+    id: "msg-1",
+    session_id: toSessionId(TEST_SESSION_ID),
+    task_id: toTaskId(TEST_TASK_ID),
+    author_type: "system",
+    content: RECOVERY_MESSAGE,
+    type: "status",
+    created_at: FAILED_AT,
+    metadata: {
+      variant: "error",
+      recovery_actions: true,
+      actions: [
+        { type: "ws_request", label: "Resume session", test_id: RESUME_TEST_ID },
+        { type: "ws_request", label: "Start fresh session", test_id: FRESH_TEST_ID },
+      ],
+    },
+  } as Message;
+}
+
+function bootMessage(createdAt: string, metadata: Record<string, unknown> = {}): Message {
+  return {
+    id: `boot-${createdAt}`,
+    session_id: toSessionId(TEST_SESSION_ID),
+    task_id: toTaskId(TEST_TASK_ID),
+    author_type: "agent",
+    content: "",
+    type: "script_execution",
+    created_at: createdAt,
+    metadata: {
+      script_type: "agent_boot",
+      agent_name: "OpenCode",
+      is_resuming: true,
+      status: "exited",
+      ...metadata,
+    },
+  } as Message;
+}
+
+/**
+ * Renders the card against a seeded transcript and WITHOUT activating Resume.
+ * That is the reported situation: the click acknowledgment is in-memory, so a
+ * reload, a task switch, or an auto-resume-on-open all present the persisted
+ * card with no acknowledgment at all.
+ */
+function renderWithTranscript(sessionState: TaskSessionState, messages: Message[]) {
+  const initialState: Partial<AppState> = {
+    taskSessions: { items: { [TEST_SESSION_ID]: { state: sessionState } as TaskSession } },
+    turns: { bySession: {}, activeBySession: {} },
+    messages: { bySession: { [TEST_SESSION_ID]: messages }, metaBySession: {} },
+  };
+  return render(<ActionMessage comment={recoveryMessage()} />, {
+    wrapper: ({ children }) => (
+      <StateProvider initialState={initialState}>{children}</StateProvider>
+    ),
+  });
+}
+
+describe("ActionMessage — recovery card retires once the agent is back", () => {
+  it("hides the card when a resume re-established the agent after the failure", () => {
+    // A resumed agent settles at WAITING_FOR_INPUT, not RUNNING, so the session
+    // state alone never retires the card.
+    renderWithTranscript("WAITING_FOR_INPUT", [bootMessage(BOOTED_AFTER_FAILURE)]);
+
+    expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull();
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_TEST_ID)).toBeNull();
+  });
+
+  it("hides the card when a fresh start re-established the agent after the failure", () => {
+    renderWithTranscript("WAITING_FOR_INPUT", [
+      bootMessage(BOOTED_AFTER_FAILURE, { is_resuming: false }),
+    ]);
+
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+  });
+
+  it("keeps the card visible when the resume attempt failed", () => {
+    renderWithTranscript("WAITING_FOR_INPUT", [
+      bootMessage(BOOTED_AFTER_FAILURE, { status: "failed" }),
+    ]);
+
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps the card visible while the resume is still running", () => {
+    renderWithTranscript("WAITING_FOR_INPUT", [
+      bootMessage(BOOTED_AFTER_FAILURE, { status: "running" }),
+    ]);
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps the card visible when the only successful boot predates the failure", () => {
+    renderWithTranscript("WAITING_FOR_INPUT", [bootMessage(BOOTED_BEFORE_FAILURE)]);
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps the card visible when the transcript holds no boot record at all", () => {
+    renderWithTranscript("WAITING_FOR_INPUT", []);
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+});
