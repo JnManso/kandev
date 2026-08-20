@@ -216,8 +216,10 @@ dev: doctor
 #
 # $(if $(strip …),…) tests emptiness on the trimmed value but substitutes the
 # original, so a blank falls through to the next source while a real path keeps
-# the internal spaces $(strip …) would otherwise collapse. Values are forwarded
-# as-is; the launcher trims its own leading/trailing whitespace.
+# the internal spaces $(strip …) would otherwise collapse. Export the Make
+# variable so both environment and command-line assignments reach $(shell).
+# Trim only the outer padding before the database suffix is appended.
+export KANDEV_HOME_DIR
 KANDEV_PROD_HOME_DIR := $(if $(strip $(KANDEV_HOME_DIR)),$(shell printf '%s' "$$KANDEV_HOME_DIR" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$$//'),$(HOME)/.kandev)
 KANDEV_PROD_DB_PATH := $(if $(strip $(KANDEV_DATABASE_PATH)),$(KANDEV_DATABASE_PATH),$(KANDEV_PROD_HOME_DIR)/data/kandev.db)
 dev-prod-db: export KANDEV_DATABASE_PATH := $(KANDEV_PROD_DB_PATH)

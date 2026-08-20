@@ -31,6 +31,11 @@ resolve() {
 		-n dev-prod-db 2>/dev/null | tail -n 1
 }
 
+resolve_make_home() {
+	env -u KANDEV_DATABASE_PATH make -C "$ROOT_DIR" --no-print-directory MAKE="$PROBE_MAKE" \
+		-n dev-prod-db "KANDEV_HOME_DIR=$1" 2>/dev/null | tail -n 1
+}
+
 expect_eq() {
 	local label=$1 want=$2 got=$3
 	if [ "$got" = "$want" ]; then
@@ -98,6 +103,11 @@ expect_eq "spaces inside KANDEV_HOME_DIR" 'D:\kandev  probe/data/kandev.db' \
 #    become internal path characters and survive the launcher's TrimSpace.
 expect_eq "padded KANDEV_HOME_DIR" 'D:\kandev-probe/data/kandev.db' \
 	"$(resolve -u KANDEV_DATABASE_PATH 'KANDEV_HOME_DIR=  D:\kandev-probe   ')"
+
+# 9. A Make command-line assignment must use the same trimmed home path. The
+#    explicit environment database is cleared so the home remains the source.
+expect_eq "Make variable home" 'D:\kandev-probe/data/kandev.db' \
+	"$(resolve_make_home 'D:\kandev-probe   ')"
 
 if [ "$status" -eq 0 ]; then
 	echo "All dev-prod-db path checks passed (env db path > KANDEV_HOME_DIR > \$HOME/.kandev)."
