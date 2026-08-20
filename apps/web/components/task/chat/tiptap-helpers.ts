@@ -343,7 +343,7 @@ function shouldStripPastedFormatting(clipboardData: DataTransfer): boolean {
  * never rendered.
  */
 function singleLinkHref(html: string): string | null {
-  if (!html.includes("<a")) return null;
+  if (!/<a(?=[\t\n\f\r />])/iu.test(html)) return null;
   const doc = new DOMParser().parseFromString(html, "text/html");
   const anchors = doc.querySelectorAll("a[href]");
   if (anchors.length !== 1) return null;

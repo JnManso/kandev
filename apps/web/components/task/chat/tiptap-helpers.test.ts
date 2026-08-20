@@ -389,6 +389,18 @@ describe("handleEditorPaste formatting", () => {
     expect(pasteText).toHaveBeenCalledWith(url);
   });
 
+  it("extracts the href from case-insensitive HTML anchor tags", () => {
+    const pasteText = vi.fn();
+    const url = "https://example.com/boards/sprint/42?workitem=1234";
+    const event = htmlPasteEvent(
+      `<A HREF="${url}">Example Board Sprint 42</A>`,
+      "Example Board Sprint 42",
+    );
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith(url);
+  });
+
   it("falls back to plain text when a link is embedded in other content", () => {
     const pasteText = vi.fn();
     const event = htmlPasteEvent(
