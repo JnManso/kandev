@@ -181,7 +181,13 @@ function renderActionWithStore(
         [TEST_SESSION_ID]: { state: sessionState, error_message: sessionError } as TaskSession,
       },
     },
-    turns: { bySession: {}, activeBySession: {} },
+    turns: {
+      bySession: {},
+      activeBySession: {},
+      loadedBySession: {},
+      reconcileEpochBySession: {},
+      settledBoundaryBySession: {},
+    },
   };
   const utils = render(
     <StateProvider initialState={initialState}>

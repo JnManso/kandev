@@ -236,11 +236,14 @@ test.describe("Session recovery", () => {
     // transcript's own agent-boot record is what keeps it hidden.
     await testPage.reload();
     await session.waitForLoad();
-    await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
-      "contenteditable",
-      "true",
-      { timeout: 30_000 },
-    );
+    // Gate on the transcript's own boot record rather than the composer becoming
+    // editable: the boot row is the signal the card is derived from, so waiting
+    // for it removes the race where a fast hydration outruns the WS history.
+    // (session.waitForChatIdle is unusable here — it clicks a visible Resume
+    // button, which would hide the very regression this asserts.)
+    await expect(testPage.getByText(/Resumed agent|Started agent/i).first()).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
 

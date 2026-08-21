@@ -128,12 +128,35 @@ type AgentBootMetadata = {
  *  the boot header renders with (script-execution-message.tsx): an "exited"
  *  status carrying a zero or absent exit code. */
 export function isSuccessfulAgentBootMessage(message: Message): boolean {
+  if (!isAgentBootMessage(message)) return false;
+  const metadata = message.metadata as AgentBootMetadata | undefined;
+  return (
+    metadata?.status === "exited" && (metadata.exit_code === 0 || metadata.exit_code === undefined)
+  );
+}
+
+/** True when a message is an agent boot row, whatever its outcome. */
+function isAgentBootMessage(message: Message): boolean {
   if (message.type !== "script_execution") return false;
   const metadata = message.metadata as AgentBootMetadata | undefined;
-  if (metadata?.script_type !== "agent_boot") return false;
-  return (
-    metadata.status === "exited" && (metadata.exit_code === 0 || metadata.exit_code === undefined)
-  );
+  return metadata?.script_type === "agent_boot";
+}
+
+/** True when an agent boot after `afterCreatedAt` reported a failure — the signal that a
+ *  requested recovery did not take, so its card must come back. */
+export function hasFailedAgentBootAfter(
+  messages: Message[] | undefined,
+  afterCreatedAt: string | undefined,
+): boolean {
+  const failedAt = Date.parse(afterCreatedAt ?? "");
+  if (Number.isNaN(failedAt) || !messages?.length) return false;
+  return messages.some((message) => {
+    if (!isAgentBootMessage(message) || isSuccessfulAgentBootMessage(message)) return false;
+    const metadata = message.metadata as AgentBootMetadata | undefined;
+    if (metadata?.status !== "failed" && metadata?.status !== "exited") return false;
+    const bootedAt = Date.parse(message.created_at ?? "");
+    return !Number.isNaN(bootedAt) && bootedAt > failedAt;
+  });
 }
 
 /** True when the agent was successfully (re)established after `afterCreatedAt`.

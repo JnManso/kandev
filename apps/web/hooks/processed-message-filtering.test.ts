@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
-import { hasSuccessfulAgentBootAfter } from "./processed-message-filtering";
+import {
+  hasFailedAgentBootAfter,
+  hasSuccessfulAgentBootAfter,
+} from "./processed-message-filtering";
 
 const ERROR_AT = "2026-05-30T00:00:00Z";
 const AFTER = "2026-05-30T00:01:00Z";
@@ -84,5 +87,38 @@ describe("hasSuccessfulAgentBootAfter", () => {
   it("finds the boot even when it is not the newest message", () => {
     const later = { ...bootMessage("2026-05-30T00:02:00Z"), type: "message" } as Message;
     expect(hasSuccessfulAgentBootAfter([bootMessage(AFTER), later], ERROR_AT)).toBe(true);
+  });
+});
+
+describe("hasFailedAgentBootAfter", () => {
+  it("returns true when a boot after the failure reports status failed", () => {
+    expect(hasFailedAgentBootAfter([bootMessage(AFTER, { status: "failed" })], ERROR_AT)).toBe(
+      true,
+    );
+  });
+
+  it("returns true when a boot after the failure exits non-zero", () => {
+    expect(hasFailedAgentBootAfter([bootMessage(AFTER, { exit_code: 1 })], ERROR_AT)).toBe(true);
+  });
+
+  it("returns false for a successful boot", () => {
+    expect(hasFailedAgentBootAfter([bootMessage(AFTER)], ERROR_AT)).toBe(false);
+  });
+
+  it("returns false while the boot is still running", () => {
+    expect(hasFailedAgentBootAfter([bootMessage(AFTER, { status: "running" })], ERROR_AT)).toBe(
+      false,
+    );
+  });
+
+  it("returns false when the failed boot predates the failure", () => {
+    expect(hasFailedAgentBootAfter([bootMessage(BEFORE, { status: "failed" })], ERROR_AT)).toBe(
+      false,
+    );
+  });
+
+  it("ignores non-boot scripts that failed after the failure", () => {
+    const setup = bootMessage(AFTER, { script_type: "setup", status: "failed" });
+    expect(hasFailedAgentBootAfter([setup], ERROR_AT)).toBe(false);
   });
 });

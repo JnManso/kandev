@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { StateProvider } from "@/components/state-provider";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import type { StoreApi } from "zustand";
 import { ActionMessage } from "./action-message";
 import {
   sessionId as toSessionId,
@@ -11,11 +12,16 @@ import {
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 
-// These specs never activate a button, so the recovery request never leaves the
-// client; a null client keeps the real WS module out of the test entirely.
-vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => null }));
+const requestMock = vi.fn().mockResolvedValue({});
 
-afterEach(cleanup);
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({ request: requestMock }),
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 const RECOVERY_MESSAGE = "Agent encountered an error";
 const RESUME_TEST_ID = "recovery-resume-button";
@@ -31,7 +37,7 @@ function recoveryMessage(): Message {
     id: "msg-1",
     session_id: toSessionId(TEST_SESSION_ID),
     task_id: toTaskId(TEST_TASK_ID),
-    author_type: "system",
+    author_type: "agent",
     content: RECOVERY_MESSAGE,
     type: "status",
     created_at: FAILED_AT,
@@ -39,8 +45,24 @@ function recoveryMessage(): Message {
       variant: "error",
       recovery_actions: true,
       actions: [
-        { type: "ws_request", label: "Resume session", test_id: RESUME_TEST_ID },
-        { type: "ws_request", label: "Start fresh session", test_id: FRESH_TEST_ID },
+        {
+          type: "ws_request",
+          label: "Resume session",
+          test_id: RESUME_TEST_ID,
+          params: {
+            method: "session.recover",
+            payload: { task_id: TEST_TASK_ID, session_id: TEST_SESSION_ID, action: "resume" },
+          },
+        },
+        {
+          type: "ws_request",
+          label: "Start fresh session",
+          test_id: FRESH_TEST_ID,
+          params: {
+            method: "session.recover",
+            payload: { task_id: TEST_TASK_ID, session_id: TEST_SESSION_ID, action: "fresh_start" },
+          },
+        },
       ],
     },
   } as Message;
@@ -74,7 +96,13 @@ function bootMessage(createdAt: string, metadata: Record<string, unknown> = {}):
 function renderWithTranscript(sessionState: TaskSessionState, messages: Message[]) {
   const initialState: Partial<AppState> = {
     taskSessions: { items: { [TEST_SESSION_ID]: { state: sessionState } as TaskSession } },
-    turns: { bySession: {}, activeBySession: {} },
+    turns: {
+      bySession: {},
+      activeBySession: {},
+      loadedBySession: {},
+      reconcileEpochBySession: {},
+      settledBoundaryBySession: {},
+    },
     messages: { bySession: { [TEST_SESSION_ID]: messages }, metaBySession: {} },
   };
   return render(<ActionMessage comment={recoveryMessage()} />, {
@@ -130,5 +158,94 @@ describe("ActionMessage — recovery card retires once the agent is back", () =>
     renderWithTranscript("WAITING_FOR_INPUT", []);
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+});
+
+/** Renders the card with a live store handle so a spec can land transcript rows and
+ *  session transitions after the user has already pressed Resume. */
+function renderWithLiveStore(messages: Message[]) {
+  let store: StoreApi<AppState> | null = null;
+  function CaptureStore() {
+    store = useAppStoreApi();
+    return null;
+  }
+  const initialState: Partial<AppState> = {
+    taskSessions: {
+      items: { [TEST_SESSION_ID]: { state: "WAITING_FOR_INPUT" } as TaskSession },
+    },
+    turns: {
+      bySession: {},
+      activeBySession: {},
+      loadedBySession: {},
+      reconcileEpochBySession: {},
+      settledBoundaryBySession: {},
+    },
+    messages: { bySession: { [TEST_SESSION_ID]: messages }, metaBySession: {} },
+  };
+  render(
+    <StateProvider initialState={initialState}>
+      <CaptureStore />
+      <ActionMessage comment={recoveryMessage()} />
+    </StateProvider>,
+  );
+  return {
+    setSessionState: (state: TaskSessionState) =>
+      act(() => {
+        store?.getState().setTaskSession({
+          id: toSessionId(TEST_SESSION_ID),
+          task_id: toTaskId(TEST_TASK_ID),
+          state,
+          started_at: "",
+          updated_at: "",
+        } as TaskSession);
+      }),
+    setMessages: (next: Message[]) =>
+      act(() => {
+        store?.getState().setMessages(toSessionId(TEST_SESSION_ID), next);
+      }),
+  };
+}
+
+describe("ActionMessage — a recovery that failed keeps its controls", () => {
+  it("brings the card back when the boot after an accepted resume reports failure", async () => {
+    const live = renderWithLiveStore([]);
+
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+
+    // The launch was accepted, so the card hid; the agent then failed to come up.
+    live.setSessionState("STARTING");
+    live.setMessages([bootMessage(BOOTED_AFTER_FAILURE, { status: "failed" })]);
+    live.setSessionState("WAITING_FOR_INPUT");
+
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+    expect(screen.getByTestId(FRESH_TEST_ID)).toBeTruthy();
+  });
+
+  it("brings the card back when an accepted resume drives the session to FAILED", async () => {
+    const live = renderWithLiveStore([]);
+
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+
+    live.setSessionState("FAILED");
+
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+    expect(screen.getByTestId(FRESH_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps the card retired when the accepted resume actually boots", async () => {
+    const live = renderWithLiveStore([]);
+
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+
+    live.setSessionState("STARTING");
+    live.setMessages([bootMessage(BOOTED_AFTER_FAILURE)]);
+    live.setSessionState("WAITING_FOR_INPUT");
+
+    expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull();
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
   });
 });

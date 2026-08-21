@@ -25,7 +25,10 @@ import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
-import { hasSuccessfulAgentBootAfter } from "@/hooks/processed-message-filtering";
+import {
+  hasFailedAgentBootAfter,
+  hasSuccessfulAgentBootAfter,
+} from "@/hooks/processed-message-filtering";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   archive: IconArchive,
@@ -61,7 +64,11 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // records that the agent booted again after this failure. It survives a
   // reload or task switch and also covers auto-resume-on-open, where the card
   // would otherwise linger until the next prompt flipped the session to RUNNING.
-  const agentRebooted = useAgentRebootedAfterMessage(comment);
+  const { agentRebooted, agentBootFailed } = useAgentBootOutcomeAfterMessage(comment);
+  // The click acknowledgment only covers the wait for that outcome. A recovery
+  // that came back failed — a failed boot row, or a session driven to FAILED —
+  // must surface its card again, buttons included, or the retry is unreachable.
+  const recoveryFailedAgain = agentBootFailed || sessionState === "FAILED";
 
   if (metadata?.action_visibility === "running") {
     if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
@@ -87,7 +94,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={comment.task_id}
-      recoveryResolved={recoveryRequested || agentRebooted}
+      recoveryResolved={agentRebooted || (recoveryRequested && !recoveryFailedAgain)}
       onRecoveryRequested={() => setRecoveryRequested(true)}
     />
   );
@@ -418,11 +425,14 @@ function ProviderQuotaRecovery({
   );
 }
 
-/** Reads the session transcript for a successful agent boot newer than this
- *  message. Selecting the derived boolean (not the array) keeps the memoized
- *  message row from re-rendering on every streamed token. */
-function useAgentRebootedAfterMessage(comment: Message): boolean {
-  return useAppStore((state) =>
+/** Reads how the agent boots after this message turned out. Each selector returns a
+ *  derived boolean, not the array, so the memoized message row does not re-render on
+ *  every streamed token. */
+function useAgentBootOutcomeAfterMessage(comment: Message): {
+  agentRebooted: boolean;
+  agentBootFailed: boolean;
+} {
+  const agentRebooted = useAppStore((state) =>
     comment.session_id
       ? hasSuccessfulAgentBootAfter(
           state.messages.bySession[comment.session_id],
@@ -430,6 +440,12 @@ function useAgentRebootedAfterMessage(comment: Message): boolean {
         )
       : false,
   );
+  const agentBootFailed = useAppStore((state) =>
+    comment.session_id
+      ? hasFailedAgentBootAfter(state.messages.bySession[comment.session_id], comment.created_at)
+      : false,
+  );
+  return { agentRebooted, agentBootFailed };
 }
 
 function useActionMessageSession(sessionId: Message["session_id"]) {
