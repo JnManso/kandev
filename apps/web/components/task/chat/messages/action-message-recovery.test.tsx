@@ -93,9 +93,17 @@ function bootMessage(createdAt: string, metadata: Record<string, unknown> = {}):
  * reload, a task switch, or an auto-resume-on-open all present the persisted
  * card with no acknowledgment at all.
  */
-function renderWithTranscript(sessionState: TaskSessionState, messages: Message[]) {
+function renderWithTranscript(
+  sessionState: TaskSessionState,
+  messages: Message[],
+  sessionMetadata?: Record<string, unknown>,
+) {
   const initialState: Partial<AppState> = {
-    taskSessions: { items: { [TEST_SESSION_ID]: { state: sessionState } as TaskSession } },
+    taskSessions: {
+      items: {
+        [TEST_SESSION_ID]: { state: sessionState, metadata: sessionMetadata } as TaskSession,
+      },
+    },
     turns: {
       bySession: {},
       activeBySession: {},
@@ -158,6 +166,13 @@ describe("ActionMessage — recovery card retires once the agent is back", () =>
     renderWithTranscript("WAITING_FOR_INPUT", []);
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("uses the durable session resolution when the boot record is missing", () => {
+    renderWithTranscript("WAITING_FOR_INPUT", [], { recovery_resolved_at: BOOTED_AFTER_FAILURE });
+
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_TEST_ID)).toBeNull();
   });
 });
 

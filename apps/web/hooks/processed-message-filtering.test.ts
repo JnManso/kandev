@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
   hasFailedAgentBootAfter,
+  hasSessionRecoveryResolutionAfter,
   hasSuccessfulAgentBootAfter,
+  isSuccessfulScriptExecutionMetadata,
 } from "./processed-message-filtering";
 
 const ERROR_AT = "2026-05-30T00:00:00Z";
@@ -87,6 +89,34 @@ describe("hasSuccessfulAgentBootAfter", () => {
   it("finds the boot even when it is not the newest message", () => {
     const later = { ...bootMessage("2026-05-30T00:02:00Z"), type: "message" } as Message;
     expect(hasSuccessfulAgentBootAfter([bootMessage(AFTER), later], ERROR_AT)).toBe(true);
+  });
+});
+
+describe("recovery resolution metadata", () => {
+  it("resolves a card only when the session timestamp is newer", () => {
+    expect(hasSessionRecoveryResolutionAfter({ recovery_resolved_at: AFTER }, ERROR_AT)).toBe(true);
+    expect(hasSessionRecoveryResolutionAfter({ recovery_resolved_at: BEFORE }, ERROR_AT)).toBe(
+      false,
+    );
+  });
+
+  it("rejects missing or invalid recovery timestamps", () => {
+    expect(hasSessionRecoveryResolutionAfter(undefined, ERROR_AT)).toBe(false);
+    expect(hasSessionRecoveryResolutionAfter({ recovery_resolved_at: "invalid" }, ERROR_AT)).toBe(
+      false,
+    );
+    expect(hasSessionRecoveryResolutionAfter({ recovery_resolved_at: AFTER }, "invalid")).toBe(
+      false,
+    );
+  });
+});
+
+describe("isSuccessfulScriptExecutionMetadata", () => {
+  it("uses the shared exited-zero success rule", () => {
+    expect(isSuccessfulScriptExecutionMetadata({ status: "exited" })).toBe(true);
+    expect(isSuccessfulScriptExecutionMetadata({ status: "exited", exit_code: 0 })).toBe(true);
+    expect(isSuccessfulScriptExecutionMetadata({ status: "exited", exit_code: 1 })).toBe(false);
+    expect(isSuccessfulScriptExecutionMetadata({ status: "running" })).toBe(false);
   });
 });
 

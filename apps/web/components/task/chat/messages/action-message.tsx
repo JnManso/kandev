@@ -17,6 +17,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useActionMessageSession, useAgentBootOutcomeAfterMessage } from "./action-message-state";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { deleteTask } from "@/lib/api/domains/kanban-api";
@@ -25,10 +26,7 @@ import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
-import {
-  hasFailedAgentBootAfter,
-  hasSuccessfulAgentBootAfter,
-} from "@/hooks/processed-message-filtering";
+import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   archive: IconArchive,
@@ -50,9 +48,12 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
   const { t } = useTranslation();
-  const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
+  const { sessionState, sessionError, sessionMetadata, activeTurnId } = useActionMessageSession(
+    comment.session_id,
+  );
   const metadata = comment.metadata as ActionMeta | undefined;
   const message = comment.content || t("task:anErrorOccurred");
+  const isRecoveryMessage = metadata?.recovery_actions === true;
   // The recovery acknowledgment lives here, on the message row that stays
   // mounted, not on SettledFailureMessage: a successful resume drives the
   // session through STARTING/RUNNING (which unmounts the card via
@@ -64,7 +65,13 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // records that the agent booted again after this failure. It survives a
   // reload or task switch and also covers auto-resume-on-open, where the card
   // would otherwise linger until the next prompt flipped the session to RUNNING.
-  const { agentRebooted, agentBootFailed } = useAgentBootOutcomeAfterMessage(comment);
+  const { agentRebooted, agentBootFailed } = useAgentBootOutcomeAfterMessage(
+    comment,
+    isRecoveryMessage,
+  );
+  const recoveryResolvedDurably = isRecoveryMessage
+    ? hasSessionRecoveryResolutionAfter(sessionMetadata, comment.created_at)
+    : false;
   // The click acknowledgment only covers the wait for that outcome. A recovery
   // that came back failed — a failed boot row, or a session driven to FAILED —
   // must surface its card again, buttons included, or the retry is unreachable.
@@ -94,7 +101,9 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={comment.task_id}
-      recoveryResolved={agentRebooted || (recoveryRequested && !recoveryFailedAgain)}
+      recoveryResolved={
+        recoveryResolvedDurably || agentRebooted || (recoveryRequested && !recoveryFailedAgain)
+      }
       onRecoveryRequested={() => setRecoveryRequested(true)}
     />
   );
@@ -423,44 +432,6 @@ function ProviderQuotaRecovery({
       </div>
     </section>
   );
-}
-
-/** Reads how the agent boots after this message turned out. Each selector returns a
- *  derived boolean, not the array, so the memoized message row does not re-render on
- *  every streamed token. */
-function useAgentBootOutcomeAfterMessage(comment: Message): {
-  agentRebooted: boolean;
-  agentBootFailed: boolean;
-} {
-  const agentRebooted = useAppStore((state) =>
-    comment.session_id
-      ? hasSuccessfulAgentBootAfter(
-          state.messages.bySession[comment.session_id],
-          comment.created_at,
-        )
-      : false,
-  );
-  const agentBootFailed = useAppStore((state) =>
-    comment.session_id
-      ? hasFailedAgentBootAfter(state.messages.bySession[comment.session_id], comment.created_at)
-      : false,
-  );
-  return { agentRebooted, agentBootFailed };
-}
-
-function useActionMessageSession(sessionId: Message["session_id"]) {
-  const sessionState = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId]?.state ?? undefined) : undefined,
-  );
-  const sessionError = useAppStore((state) =>
-    sessionId
-      ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
-      : undefined,
-  );
-  const activeTurnId = useAppStore((state) =>
-    sessionId ? (state.turns.activeBySession[sessionId] ?? undefined) : undefined,
-  );
-  return { sessionState, sessionError, activeTurnId };
 }
 
 function RunningActionNotice({
