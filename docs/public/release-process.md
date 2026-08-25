@@ -130,6 +130,8 @@ Release-tag signing applies to future normal releases only. Backfills reuse the 
 
 Desktop OS signing and notarization are conditional on a complete secret set. Without them, the workflow can publish unsigned installers and adds a warning to release notes. Tauri updater signatures are stricter: the workflow publishes updater artifacts and `latest.json` only when the required signed set is complete. Do not claim in-app update availability from the presence of installers alone.
 
+The Windows runtime bundle is signed separately from the desktop installer, through SignPath rather than a certificate held in the repository. Store the CI user token as the `SIGNPATH_API_TOKEN` secret and the signing target as the `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, and `SIGNPATH_SIGNING_POLICY_SLUG` variables. All four are required together: with any of them missing or blank, the release publishes an unsigned Windows runtime bundle and records a workflow notice instead of failing. Signing happens before the archives are built, so the tarball, the zip, and their checksums all describe signed binaries; there is no separate signed artifact to publish. Scheduled nightlies build the same bundle, so a configured policy signs them too; point `SIGNPATH_SIGNING_POLICY_SLUG` at a test-signing policy if the release certificate should be reserved for stable releases.
+
 Never print signing material, tokens, certificate contents, or generated updater private data in logs.
 
 ## Verify every channel

@@ -39,6 +39,10 @@ name: release
 #   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID or APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_P8 — macOS notarization
 #   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD — Windows installer signing
 #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD — updater artifact signing
+# Optional configuration for a signed Windows runtime bundle. Incomplete
+# inputs publish an unsigned bundle instead of failing the release.
+#   SIGNPATH_API_TOKEN — secret holding the SignPath CI user token
+#   SIGNPATH_ORGANIZATION_ID / SIGNPATH_PROJECT_SLUG / SIGNPATH_SIGNING_POLICY_SLUG — variables identifying the signing policy
 
 on:
   schedule:
@@ -848,6 +852,68 @@ jobs:
           # what Apple Silicon (AMFI) requires; bundle validation enforces it.
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
+
+      # Signing runs here, before packaging, so the archives published to the
+      # release carry signed binaries. Only build-desktop signed before, and
+      # only its own copy under src-tauri/resources — so the tarball Homebrew,
+      # Scoop and npm consume, and the zip a winget submission would, shipped
+      # unsigned executables even once a certificate existed. See #2312.
+      #
+      # SignPath signs remotely, so Windows keeps cross-compiling on Linux. The
+      # binaries have to be uploaded as a workflow artifact first: that is how
+      # SignPath verifies the build's origin without trusting this file.
+      - name: Detect SignPath signing inputs
+        if: matrix.goos == 'windows'
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          set -euo pipefail
+          # A token without the variables would hand the signing action empty
+          # inputs and fail the release rather than fall back to an unsigned
+          # build, so the guard requires all four together.
+          if reason="$(bash scripts/release/signpath-signing-ready.sh 2>&1 >/dev/null)"; then
+            echo "SIGNPATH_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::${reason} Publishing an unsigned Windows runtime bundle."
+          fi
+
+      # upload-artifact reduces multiple paths to their least common ancestor,
+      # so the stored ZIP holds kandev.exe and agentctl.exe at its root, not
+      # under apps/backend/bin. The SignPath artifact configuration has to
+      # match that shape: <zip-file> containing the two <pe-file> entries by
+      # bare name. The bundle has no other PE files: the remote agentctl
+      # helpers are built for linux and darwin only.
+      #
+      # SignPath reads the workflow run and downloads this artifact with the
+      # job's GITHUB_TOKEN. That needs no `actions: read` grant while the
+      # repository is public; a private fork would have to add one.
+      - name: Upload unsigned Windows binaries
+        id: unsigned-windows-binaries
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-binaries
+          path: |
+            apps/backend/bin/kandev.exe
+            apps/backend/bin/agentctl.exe
+
+      - name: Sign Windows runtime binaries
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-windows-binaries.outputs.artifact-id }}
+          wait-for-completion: true
+          # Extracted back over the unsigned binaries so the packaging step
+          # below copies the signed ones without knowing signing happened.
+          output-artifact-directory: apps/backend/bin
 
       - name: Package bundle
         run: |
