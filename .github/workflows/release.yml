@@ -849,6 +849,67 @@ jobs:
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
 
+      # Signing runs here, before packaging, so the archive published to the
+      # release carries signed binaries. Only build-desktop signed before, and
+      # only its own copy under src-tauri/resources, so Scoop, npm and direct
+      # downloads shipped unsigned executables even once a certificate existed.
+      # See #2312.
+      #
+      # SignPath signs remotely, so Windows keeps cross-compiling on Linux. The
+      # binaries have to be uploaded as a workflow artifact first: that is how
+      # SignPath verifies the build's origin without trusting this file.
+      - name: Detect SignPath signing inputs
+        if: matrix.goos == 'windows'
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          set -euo pipefail
+          # All four are required together. A token without the variables would
+          # hand the action empty inputs and fail the release rather than fall
+          # back to an unsigned build.
+          missing=
+          [ -n "${SIGNPATH_API_TOKEN:-}" ] || missing="${missing} SIGNPATH_API_TOKEN"
+          [ -n "${SIGNPATH_ORGANIZATION_ID:-}" ] || missing="${missing} SIGNPATH_ORGANIZATION_ID"
+          [ -n "${SIGNPATH_PROJECT_SLUG:-}" ] || missing="${missing} SIGNPATH_PROJECT_SLUG"
+          [ -n "${SIGNPATH_SIGNING_POLICY_SLUG:-}" ] || missing="${missing} SIGNPATH_SIGNING_POLICY_SLUG"
+          if [ -z "${missing}" ]; then
+            echo "SIGNPATH_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::SignPath signing inputs are incomplete (missing:${missing}); publishing an unsigned Windows runtime bundle."
+          fi
+
+      # upload-artifact stores a ZIP, so the SignPath artifact configuration
+      # uses <zip-file> as its root element containing these two paths. The
+      # bundle has no other PE files: the remote agentctl helpers are built
+      # for linux and darwin only.
+      - name: Upload unsigned Windows binaries
+        id: unsigned-windows-binaries
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-binaries
+          path: |
+            apps/backend/bin/kandev.exe
+            apps/backend/bin/agentctl.exe
+
+      - name: Sign Windows runtime binaries
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-windows-binaries.outputs.artifact-id }}
+          wait-for-completion: true
+          # Extracted back over the unsigned binaries so the packaging step
+          # below copies the signed ones without knowing signing happened.
+          output-artifact-directory: apps/backend/bin
+
       - name: Package bundle
         run: |
           rm -rf dist/kandev
