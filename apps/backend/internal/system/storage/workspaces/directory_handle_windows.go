@@ -19,27 +19,32 @@ type windowsDirectoryHandle struct {
 	rootHandle   windows.Handle
 	parentHandle windows.Handle
 	targetHandle windows.Handle
+	target       string
 	once         sync.Once
 }
 
 // OpenDirectoryNoFollow opens root and target with OBJ_DONT_REPARSE and
-// FILE_OPEN_REPARSE_POINT for every component.
+// FILE_OPEN_REPARSE_POINT for every component. It requests read-only access so a
+// process whose current directory sits in the task root or worktree (a CWD
+// handle carries no FILE_SHARE_DELETE) cannot make validation fail with a
+// sharing violation. DELETE is deferred to RemoveDirectory.
 func OpenDirectoryNoFollow(root, target string) (DirectoryHandle, error) {
 	relative, err := dependencyRelativePath(root, target)
 	if err != nil {
 		return nil, err
 	}
-	rootHandle, err := openWindowsDependencyDirectoryPath(root)
+	rootHandle, err := openWindowsDependencyDirectoryPath(root, windowsDependencyReadAccess)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open task root: %w", err)
 	}
-	parentHandle, targetHandle, err := openWindowsDependencyTarget(rootHandle, relative)
+	parentHandle, targetHandle, err := openWindowsDependencyTarget(rootHandle, relative, windowsDependencyReadAccess)
 	if err != nil {
 		_ = windows.CloseHandle(rootHandle)
-		return nil, err
+		return nil, fmt.Errorf("open worktree target: %w", err)
 	}
 	return &windowsDirectoryHandle{
 		rootHandle: rootHandle, parentHandle: parentHandle, targetHandle: targetHandle,
+		target: filepath.Base(filepath.Clean(relative)),
 	}, nil
 }
 
@@ -61,6 +66,7 @@ func CreateDirectoryNoFollow(root, target string, _ os.FileMode) (DirectoryHandl
 	}
 	return &windowsDirectoryHandle{
 		rootHandle: rootHandle, parentHandle: parentHandle, targetHandle: targetHandle,
+		target: filepath.Base(filepath.Clean(relative)),
 	}, nil
 }
 
@@ -123,7 +129,7 @@ func (h *windowsDirectoryHandle) IsValidWorktree() bool {
 // never resolves the directory again from its lexical path, so a rename or
 // replacement cannot redirect deletion to a different workspace.
 func (h *windowsDirectoryHandle) RemoveDirectory(ctx context.Context) error {
-	if h == nil || h.targetHandle == 0 {
+	if h == nil || h.targetHandle == 0 || h.parentHandle == 0 || h.target == "" {
 		return errors.New("directory handle is closed")
 	}
 	if err := removeWindowsDependencyContents(ctx, h.targetHandle); err != nil {
@@ -132,7 +138,47 @@ func (h *windowsDirectoryHandle) RemoveDirectory(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return markWindowsDependencyForDelete(h.targetHandle)
+	return h.markPinnedTargetForDelete()
+}
+
+// markPinnedTargetForDelete reopens the pinned target relative to its parent
+// with DELETE access. The validation open deliberately omitted DELETE so a
+// process whose current directory sits in the task root could not block resume
+// with a sharing violation; the deletion open needs DELETE, so it happens here.
+// The reopened handle is confirmed to be the same file as the pinned target
+// before it is marked, so a lexical replacement cannot redirect the deletion.
+func (h *windowsDirectoryHandle) markPinnedTargetForDelete() error {
+	deletable, err := openWindowsDependencyDirectoryRelative(h.parentHandle, h.target, windowsDependencyDeleteAccess)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// The pinned directory was renamed. Its contents are cleared, but no
+			// lexical entry remains for this handle to unlink.
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = windows.CloseHandle(deletable) }()
+	same, err := windowsDependencyHandlesSameFile(h.targetHandle, deletable)
+	if err != nil {
+		return err
+	}
+	if !same {
+		return errors.New("pinned directory path changed during cleanup")
+	}
+	return markWindowsDependencyForDelete(deletable)
+}
+
+func windowsDependencyHandlesSameFile(a, b windows.Handle) (bool, error) {
+	var infoA, infoB windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(a, &infoA); err != nil {
+		return false, err
+	}
+	if err := windows.GetFileInformationByHandle(b, &infoB); err != nil {
+		return false, err
+	}
+	return infoA.VolumeSerialNumber == infoB.VolumeSerialNumber &&
+		infoA.FileIndexHigh == infoB.FileIndexHigh &&
+		infoA.FileIndexLow == infoB.FileIndexLow, nil
 }
 
 func (h *windowsDirectoryHandle) ReadFile(name string) ([]byte, error) {
@@ -142,7 +188,7 @@ func (h *windowsDirectoryHandle) ReadFile(name string) ([]byte, error) {
 	if err := validateDirectoryEntryName(name); err != nil {
 		return nil, err
 	}
-	handle, err := openWindowsDependencyEntryRelative(h.targetHandle, name)
+	handle, err := openWindowsDependencyEntryRelative(h.targetHandle, name, windowsDependencyReadAccess)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +226,7 @@ func (h *windowsDirectoryHandle) WriteFile(name string, data []byte, _ os.FileMo
 		return err
 	}
 	handle, err := openWindowsDependencyHandleWithDisposition(
-		h.targetHandle, name, windows.FILE_OVERWRITE_IF, windows.FILE_NON_DIRECTORY_FILE,
+		h.targetHandle, name, windowsDependencyWriteAccess, windows.FILE_OVERWRITE_IF, windows.FILE_NON_DIRECTORY_FILE,
 	)
 	if err != nil {
 		return err
@@ -202,13 +248,13 @@ func openOrCreateWindowsDependencyDirectoryPath(path string) (windows.Handle, er
 	if err != nil {
 		return 0, err
 	}
-	rootHandle, err := openWindowsDependencyHandle(0, windowsDependencyNTPath(root), windows.FILE_DIRECTORY_FILE)
+	rootHandle, err := openWindowsDependencyHandle(0, windowsDependencyNTPath(root), windowsDependencyWriteAccess, windows.FILE_DIRECTORY_FILE)
 	if err != nil {
 		return 0, err
 	}
 	for _, part := range parts {
 		next, openErr := openWindowsDependencyHandleWithDisposition(
-			rootHandle, part, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
+			rootHandle, part, windowsDependencyWriteAccess, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
 		)
 		if openErr != nil {
 			_ = windows.CloseHandle(rootHandle)
@@ -234,7 +280,7 @@ func openOrCreateWindowsDependencyTarget(rootHandle windows.Handle, relative str
 	parent = rootHandle
 	for index, part := range parts {
 		next, openErr := openWindowsDependencyHandleWithDisposition(
-			parent, part, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
+			parent, part, windowsDependencyWriteAccess, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
 		)
 		if openErr != nil {
 			if parent != rootHandle {
