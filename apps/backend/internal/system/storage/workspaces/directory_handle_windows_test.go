@@ -119,6 +119,11 @@ func TestRemoveDirectoryFailsCleanlyWithShareIncompatibleHolder(t *testing.T) {
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
+	sentinel := filepath.Join(worktree, "sentinel.txt")
+	const sentinelContent = "keep this file"
+	if err := os.WriteFile(sentinel, []byte(sentinelContent), 0o600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
 
 	handle, err := OpenDirectoryNoFollow(taskRoot, worktree)
 	if err != nil {
@@ -137,6 +142,13 @@ func TestRemoveDirectoryFailsCleanlyWithShareIncompatibleHolder(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(worktree); statErr != nil {
 		t.Fatalf("worktree removed despite the holder: %v", statErr)
+	}
+	content, readErr := os.ReadFile(sentinel)
+	if readErr != nil {
+		t.Fatalf("sentinel removed despite the holder: %v", readErr)
+	}
+	if string(content) != sentinelContent {
+		t.Fatalf("sentinel content = %q, want %q", content, sentinelContent)
 	}
 }
 

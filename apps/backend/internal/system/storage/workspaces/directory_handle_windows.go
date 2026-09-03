@@ -132,40 +132,65 @@ func (h *windowsDirectoryHandle) RemoveDirectory(ctx context.Context) error {
 	if h == nil || h.targetHandle == 0 || h.parentHandle == 0 || h.target == "" {
 		return errors.New("directory handle is closed")
 	}
-	if err := removeWindowsDependencyContents(ctx, h.targetHandle); err != nil {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	deletable, same, err := h.openPinnedTargetForDelete()
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			// A sharing violation must be reported before any child entry is
+			// removed. The caller can retry after the holder releases the target.
+			return err
+		}
+		// The pinned directory was renamed and has no lexical entry to mark.
+		// Its handle still identifies the original worktree, so clean it through
+		// that handle and preserve the existing no-follow behavior.
+		return removeWindowsDependencyContents(ctx, h.targetHandle)
+	}
+	if !same {
+		// The lexical path now names another directory. Continue through the
+		// pinned handle so the replacement cannot be touched, but report the
+		// path change to the caller after the original contents are cleared.
+		if err := removeWindowsDependencyContents(ctx, h.targetHandle); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return errors.New("pinned directory path changed during cleanup")
+	}
+	defer func() { _ = windows.CloseHandle(deletable) }()
+	if err := removeWindowsDependencyContents(ctx, deletable); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return h.markPinnedTargetForDelete()
+	return markWindowsDependencyForDelete(deletable)
 }
 
-// markPinnedTargetForDelete reopens the pinned target relative to its parent
-// with DELETE access. The validation open deliberately omitted DELETE so a
-// process whose current directory sits in the task root could not block resume
-// with a sharing violation; the deletion open needs DELETE, so it happens here.
-// The reopened handle is confirmed to be the same file as the pinned target
-// before it is marked, so a lexical replacement cannot redirect the deletion.
-func (h *windowsDirectoryHandle) markPinnedTargetForDelete() error {
+// openPinnedTargetForDelete reopens the target relative to its parent with
+// DELETE access before cleanup mutates any child entry. The validation open
+// deliberately omitted DELETE so a process whose current directory sits in
+// the task root could not block resume with a sharing violation. The reopened
+// handle is confirmed to be the same file as the pinned target before it is
+// used for deletion, so a lexical replacement cannot redirect the cleanup.
+func (h *windowsDirectoryHandle) openPinnedTargetForDelete() (windows.Handle, bool, error) {
 	deletable, err := openWindowsDependencyDirectoryRelative(h.parentHandle, h.target, windowsDependencyDeleteAccess)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// The pinned directory was renamed. Its contents are cleared, but no
-			// lexical entry remains for this handle to unlink.
-			return nil
-		}
-		return err
+		return 0, false, err
 	}
-	defer func() { _ = windows.CloseHandle(deletable) }()
 	same, err := windowsDependencyHandlesSameFile(h.targetHandle, deletable)
 	if err != nil {
-		return err
+		_ = windows.CloseHandle(deletable)
+		return 0, false, err
 	}
 	if !same {
-		return errors.New("pinned directory path changed during cleanup")
+		_ = windows.CloseHandle(deletable)
+		return 0, false, nil
 	}
-	return markWindowsDependencyForDelete(deletable)
+	return deletable, true, nil
 }
 
 func windowsDependencyHandlesSameFile(a, b windows.Handle) (bool, error) {
