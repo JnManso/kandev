@@ -72,6 +72,7 @@ function makeTaskSession(metadata: Record<string, unknown>): TaskSession {
 
 describe("session.models_updated user selection convergence", () => {
   const pickedModelId = "gpt-5.3-codex-spark";
+  const laterModelId = "gpt-5.4-mini";
 
   // After a page reload the store has no hydration bookkeeping, so persisted
   // runtime metadata is authoritative until a payload confirms it. A model the
@@ -154,10 +155,62 @@ describe("session.models_updated user selection convergence", () => {
     handler(makeMessage(makePayload(pickedModelId)));
     // The provider re-reports the same session a moment later; the stale
     // override must not resurrect the pre-switch model.
-    handler(makeMessage(makePayload(pickedModelId)));
+    handler(makeMessage(makePayload(laterModelId)));
 
     expect(store.getState().sessionModels.bySessionId["session-1"].currentModelId).toBe(
-      pickedModelId,
+      laterModelId,
     );
+  });
+});
+
+describe("session.models_updated startup guard", () => {
+  const pickedModelId = "gpt-5.3-codex-spark";
+
+  it("keeps persisted state during unsettled startup when active model matches", () => {
+    const store = makeStore({
+      activeModel: { bySessionId: { "session-1": pickedModelId } } as AppState["activeModel"],
+      taskSessions: {
+        items: {
+          "session-1": {
+            ...makeTaskSession({ runtime_config: { model: providerModelId } }),
+            state: "STARTING",
+          },
+        },
+      },
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: providerModelId,
+            models: [],
+            configOptions: [],
+            configOptionsSettled: true,
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(pickedModelId, {
+          config_options_settled: false,
+          config_options: [
+            {
+              type: "select",
+              id: "model",
+              name: "Model",
+              category: "model",
+              current_value: pickedModelId,
+              options: [{ value: pickedModelId, name: "Codex Spark" }],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+      currentModelId: providerModelId,
+      configOptions: [expect.objectContaining({ id: "model", currentValue: providerModelId })],
+    });
   });
 });
