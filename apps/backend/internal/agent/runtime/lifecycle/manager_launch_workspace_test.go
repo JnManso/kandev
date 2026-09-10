@@ -195,6 +195,7 @@ func addLinkedWorktree(t *testing.T, source, destination string) {
 	t.Helper()
 	cmd := exec.Command("git", "worktree", "add", "--detach", destination)
 	cmd.Dir = source
+	cmd.Env = newIsolatedGitEnv()
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git worktree add %q: %v: %s", destination, err, output)
 	}
