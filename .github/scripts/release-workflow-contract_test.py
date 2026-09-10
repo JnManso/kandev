@@ -770,6 +770,31 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         # runtime packages still read the tarball.
         self.assertIn("if [ \"${{ matrix.goos }}\" = \"windows\" ]; then", package)
 
+    def test_signed_windows_binaries_regain_execute_bits_before_packaging(self) -> None:
+        bundles = job_block("build-bundles")
+        sign = "- name: Sign Windows runtime binaries"
+        restore = "- name: Restore execute bits on signed binaries"
+        package = "- name: Package bundle"
+
+        # upload-artifact stores files without their mode bits, so the signed
+        # binaries come back 0644. package-bundle.sh rejects a launcher that is
+        # not executable, which would fail the first signed release inside the
+        # packaging step. The restore has to sit between signing and packaging.
+        for step in (sign, restore, package):
+            self.assertIn(step, bundles)
+        self.assertLess(bundles.index(sign), bundles.index(restore))
+        self.assertLess(bundles.index(restore), bundles.index(package))
+
+        step = step_block("Restore execute bits on signed binaries")
+        self.assertIn(
+            "if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'",
+            step,
+        )
+        self.assertIn(
+            "run: chmod +x apps/backend/bin/kandev.exe apps/backend/bin/agentctl.exe",
+            [line.strip() for line in step.splitlines()],
+        )
+
     def test_release_workflow_documents_the_signpath_configuration(self) -> None:
         # The documentation block a maintainer reads before configuring the
         # release: every other signing input is listed there.

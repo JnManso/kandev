@@ -853,15 +853,10 @@ jobs:
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
 
-      # Signing runs here, before packaging, so the archives published to the
-      # release carry signed binaries. Only build-desktop signed before, and
-      # only its own copy under src-tauri/resources — so the tarball Homebrew,
-      # Scoop and npm consume, and the zip a winget submission would, shipped
-      # unsigned executables even once a certificate existed. See #2312.
-      #
-      # SignPath signs remotely, so Windows keeps cross-compiling on Linux. The
-      # binaries have to be uploaded as a workflow artifact first: that is how
-      # SignPath verifies the build's origin without trusting this file.
+      # Signing runs here, before packaging, so the published archives contain
+      # signed binaries. SignPath signs remotely, so Windows keeps
+      # cross-compiling on Linux; the binaries are uploaded as a workflow
+      # artifact so SignPath can verify the build's origin.
       - name: Detect SignPath signing inputs
         if: matrix.goos == 'windows'
         env:
@@ -914,6 +909,13 @@ jobs:
           # Extracted back over the unsigned binaries so the packaging step
           # below copies the signed ones without knowing signing happened.
           output-artifact-directory: apps/backend/bin
+
+      # upload-artifact stores files without their mode bits, so the signed
+      # binaries come back 0644 and package-bundle.sh rejects a launcher that
+      # is not executable.
+      - name: Restore execute bits on signed binaries
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'
+        run: chmod +x apps/backend/bin/kandev.exe apps/backend/bin/agentctl.exe
 
       - name: Package bundle
         run: |
