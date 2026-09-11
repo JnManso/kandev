@@ -109,7 +109,7 @@ if run_with_policy deploy release-signing >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
 fi
 grep -q "Unsupported run purpose: deploy" "$TMP_DIR/err" ||
   fail "the unknown-purpose error did not identify deploy"
-grep -q "publish, validate" "$TMP_DIR/err" ||
+grep -q "publish, validate, nightly" "$TMP_DIR/err" ||
   fail "the unknown-purpose error did not list the accepted values"
 
 # Incomplete inputs stay a status-1 refusal on either purpose.
@@ -119,4 +119,19 @@ env -u SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID=o SIGNPATH_PROJECT_SLUG=p \
   >"$TMP_DIR/out" 2>"$TMP_DIR/err" || status=$?
 [ "$status" -eq 1 ] || fail "incomplete inputs on a validation run exited with $status, not 1"
 
-echo "PASS: SignPath signing readiness requires all four inputs and confines test policies to validation runs"
+# Nightlies run unattended and the release policy needs a manual approval per
+# request, so the nightly channel never submits a signing request at all. The
+# guard says so with its own status before it even looks at the inputs.
+status=0
+run_with_policy nightly release-signing >"$TMP_DIR/out" 2>"$TMP_DIR/err" || status=$?
+[ "$status" -eq 4 ] || fail "the nightly channel exited with $status, not 4"
+grep -q "Nightly channel" "$TMP_DIR/err" || fail "the nightly skip did not name the channel"
+grep -q "skipped" "$TMP_DIR/err" || fail "the nightly skip was not explicit"
+
+status=0
+env -u SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID=o SIGNPATH_PROJECT_SLUG=p \
+  SIGNPATH_SIGNING_POLICY_SLUG=release-signing bash "$SCRIPT" nightly \
+  >"$TMP_DIR/out" 2>"$TMP_DIR/err" || status=$?
+[ "$status" -eq 4 ] || fail "the nightly skip must not depend on the inputs (exited $status)"
+
+echo "PASS: SignPath signing readiness requires all four inputs, confines test policies to validation runs and skips nightlies"

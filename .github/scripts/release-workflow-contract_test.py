@@ -701,7 +701,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         # only acceptable in the second case, and its refusal has to stand out
         # from an incomplete configuration, hence a warning rather than a notice.
         self.assertIn(
-            "${{ inputs.desktop_validation_only && 'validate' || 'publish' }}",
+            "${{ needs.nightly-prepare.result == 'success' && 'nightly' || inputs.desktop_validation_only && 'validate' || 'publish' }}",
             detect,
         )
         self.assertIn('bash scripts/release/signpath-signing-ready.sh "$purpose"', detect)
@@ -709,6 +709,36 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("::notice::", detect)
         self.assertNotIn("::error::", detect)
         self.assertIn('SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"', detect)
+
+    def test_signing_is_best_effort_and_never_fails_the_release(self) -> None:
+        bundles = job_block("build-bundles")
+        upload = step_block("Upload unsigned Windows binaries")
+        sign = step_block("Sign Windows runtime binaries")
+        report = step_block("Report incomplete signing")
+
+        def lines(block: str) -> list[str]:
+            return [line.strip() for line in block.splitlines()]
+
+        # The Foundation approves every release signing request by hand, so a
+        # request can outlive any timeout. Neither the upload nor the signing
+        # step may fail the job: the tag is already pushed by then, and an
+        # unsigned bundle is the documented fallback, not a broken release.
+        self.assertIn("continue-on-error: true", lines(upload))
+        self.assertIn("continue-on-error: true", lines(sign))
+        self.assertIn("id: signpath", lines(sign))
+        self.assertIn("wait-for-completion-timeout-in-seconds: 3600", lines(sign))
+        self.assertIn("steps.unsigned-windows-binaries.outcome == 'success'", sign)
+
+        self.assertIn("steps.signpath.outcome != 'success'", report)
+        self.assertIn("env.SIGNPATH_SIGNING_ENABLED == 'true'", report)
+        self.assertIn("::warning::", report)
+        self.assertNotIn("::error::", report)
+
+        signed = "- name: Sign Windows runtime binaries"
+        reported = "- name: Report incomplete signing"
+        package = "- name: Package bundle"
+        self.assertLess(bundles.index(signed), bundles.index(reported))
+        self.assertLess(bundles.index(reported), bundles.index(package))
 
     def test_windows_bundle_is_signed_before_it_is_packaged(self) -> None:
         bundles = job_block("build-bundles")
@@ -804,7 +834,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         step = step_block("Restore execute bits on signed binaries")
         self.assertIn(
-            "if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'",
+            "if: matrix.goos == 'windows' && steps.signpath.outcome == 'success'",
             step,
         )
         self.assertIn(
@@ -846,6 +876,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "nightlies",
             "test-signing policy",
             "desktop_validation_only",
+            "one hour",
+            "manual approval",
             "not trusted by Windows",
         ):
             self.assertIn(requirement, RELEASE_PROCESS)

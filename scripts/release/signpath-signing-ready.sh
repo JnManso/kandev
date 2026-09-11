@@ -5,19 +5,22 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: signpath-signing-ready.sh [publish|validate]
+Usage: signpath-signing-ready.sh [publish|validate|nightly]
 
 Checks whether the current environment has enough SignPath inputs to submit a
 signing request for the Windows runtime binaries, and whether the configured
 signing policy is acceptable for this run:
 
-  publish   the bundle is released (stable or nightly); a test-signing policy
+  publish   the bundle is released as a stable version; a test-signing policy
             is refused, because its certificate is not trusted by Windows
   validate  nothing is published (desktop_validation_only); any policy is fine
+  nightly   the nightly channel; signing is skipped, because release signing
+            needs a manual approval per request and nightlies run unattended
 
 The default is publish. Exit status 1 means incomplete inputs, 2 a test-signing
-policy on a publishing run, 3 an unsupported purpose. None of them is a
-workflow error by itself: the release still publishes an unsigned bundle.
+policy on a publishing run, 3 an unsupported purpose, 4 the nightly channel.
+None of them is a workflow error by itself: the release still publishes an
+unsigned bundle.
 USAGE
 }
 
@@ -29,8 +32,12 @@ fi
 purpose="${1:-publish}"
 case "$purpose" in
   publish|validate) ;;
+  nightly)
+    printf 'Nightly channel: SignPath signing is skipped; release signing needs a manual approval per request and nightlies run unattended.\n' >&2
+    exit 4
+    ;;
   *)
-    printf 'Unsupported run purpose: %s (expected one of: publish, validate).\n' "$purpose" >&2
+    printf 'Unsupported run purpose: %s (expected one of: publish, validate, nightly).\n' "$purpose" >&2
     exit 3
     ;;
 esac
