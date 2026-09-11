@@ -23,7 +23,7 @@ run_with_complete_inputs() {
     SIGNPATH_API_TOKEN=test-token \
     SIGNPATH_ORGANIZATION_ID=test-org \
     SIGNPATH_PROJECT_SLUG=test-project \
-    SIGNPATH_SIGNING_POLICY_SLUG=test-policy \
+    SIGNPATH_SIGNING_POLICY_SLUG=release-signing \
     "$@" bash "$SCRIPT"
 }
 
@@ -65,4 +65,58 @@ for name in "${required[@]}"; do
     fail "the unconfigured-environment error did not name $name"
 done
 
-echo "PASS: SignPath signing readiness requires all four inputs to be non-blank"
+# A test-signing policy signs with a certificate Windows does not trust, so it
+# is only acceptable on a run that publishes nothing. On a publishing run the
+# guard refuses it with its own exit code, so the workflow can warn rather
+# than merely notice, and the bundle ships unsigned as it does today.
+run_with_policy() {
+  local purpose="$1" slug="$2"
+  env \
+    SIGNPATH_API_TOKEN=test-token \
+    SIGNPATH_ORGANIZATION_ID=test-org \
+    SIGNPATH_PROJECT_SLUG=test-project \
+    SIGNPATH_SIGNING_POLICY_SLUG="$slug" \
+    bash "$SCRIPT" $purpose
+}
+
+for slug in test-signing test test-2026; do
+  status=0
+  run_with_policy publish "$slug" >"$TMP_DIR/out" 2>"$TMP_DIR/err" || status=$?
+  [ "$status" -ne 0 ] || fail "a publishing run accepted the test policy $slug"
+  [ "$status" -eq 2 ] || fail "refusing $slug on a publishing run exited with $status, not 2"
+  grep -q "$slug" "$TMP_DIR/err" || fail "the refusal did not name the policy $slug"
+  grep -q "test-signing policy" "$TMP_DIR/err" || fail "the refusal did not say why $slug was rejected"
+  grep -q "refusing" "$TMP_DIR/err" || fail "the refusal for $slug was not explicit"
+done
+
+# The default purpose is the safe one: omitting it must behave like publish.
+if run_with_policy "" test-signing >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "omitting the purpose accepted a test policy"
+fi
+
+run_with_policy validate test-signing >"$TMP_DIR/out" 2>"$TMP_DIR/err" ||
+  fail "a validation run rejected the test policy"
+grep -q "SignPath signing inputs complete." "$TMP_DIR/out" ||
+  fail "a validation run with the test policy was not confirmed"
+
+for slug in release-signing latest-signing contest-signing; do
+  run_with_policy publish "$slug" >"$TMP_DIR/out" 2>"$TMP_DIR/err" ||
+    fail "a publishing run rejected the non-test policy $slug"
+done
+
+if run_with_policy deploy release-signing >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "an unknown purpose was accepted"
+fi
+grep -q "Unsupported run purpose: deploy" "$TMP_DIR/err" ||
+  fail "the unknown-purpose error did not identify deploy"
+grep -q "publish, validate" "$TMP_DIR/err" ||
+  fail "the unknown-purpose error did not list the accepted values"
+
+# Incomplete inputs stay a status-1 refusal on either purpose.
+status=0
+env -u SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID=o SIGNPATH_PROJECT_SLUG=p \
+  SIGNPATH_SIGNING_POLICY_SLUG=test-signing bash "$SCRIPT" validate \
+  >"$TMP_DIR/out" 2>"$TMP_DIR/err" || status=$?
+[ "$status" -eq 1 ] || fail "incomplete inputs on a validation run exited with $status, not 1"
+
+echo "PASS: SignPath signing readiness requires all four inputs and confines test policies to validation runs"

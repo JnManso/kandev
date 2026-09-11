@@ -693,6 +693,23 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("::notice::", detect)
         self.assertNotIn("::error::", detect)
 
+    def test_test_signing_policy_is_confined_to_validation_runs(self) -> None:
+        detect = step_block("Detect SignPath signing inputs")
+
+        # The guard decides by purpose: stable and nightly publish the bundle,
+        # desktop_validation_only publishes nothing. A test-signing policy is
+        # only acceptable in the second case, and its refusal has to stand out
+        # from an incomplete configuration, hence a warning rather than a notice.
+        self.assertIn(
+            "${{ inputs.desktop_validation_only && 'validate' || 'publish' }}",
+            detect,
+        )
+        self.assertIn('bash scripts/release/signpath-signing-ready.sh "$purpose"', detect)
+        self.assertIn("::warning::", detect)
+        self.assertIn("::notice::", detect)
+        self.assertNotIn("::error::", detect)
+        self.assertIn('SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"', detect)
+
     def test_windows_bundle_is_signed_before_it_is_packaged(self) -> None:
         bundles = job_block("build-bundles")
         build = "- name: Build backend binaries"
@@ -827,6 +844,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             # Nightlies build the same bundle, so the configured policy
             # signs them too. A maintainer picking a policy has to know.
             "nightlies",
+            "test-signing policy",
+            "desktop_validation_only",
+            "not trusted by Windows",
         ):
             self.assertIn(requirement, RELEASE_PROCESS)
 

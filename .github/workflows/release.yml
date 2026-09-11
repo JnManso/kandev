@@ -41,6 +41,7 @@ name: release
 #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD — updater artifact signing
 # Optional configuration for a signed Windows runtime bundle. Incomplete
 # inputs publish an unsigned bundle instead of failing the release.
+# A test-signing policy is honoured only on desktop_validation_only runs.
 #   SIGNPATH_API_TOKEN — secret holding the SignPath CI user token
 #   SIGNPATH_ORGANIZATION_ID / SIGNPATH_PROJECT_SLUG / SIGNPATH_SIGNING_POLICY_SLUG — variables identifying the signing policy
 
@@ -868,12 +869,22 @@ jobs:
           set -euo pipefail
           # A token without the variables would hand the signing action empty
           # inputs and fail the release rather than fall back to an unsigned
-          # build, so the guard requires all four together.
-          if reason="$(bash scripts/release/signpath-signing-ready.sh 2>&1 >/dev/null)"; then
+          # build, so the guard requires all four together. A test-signing
+          # policy is only honoured when nothing is published: its certificate
+          # is not trusted by Windows, so a published bundle stays unsigned
+          # rather than carrying an untrusted signature.
+          purpose="${{ inputs.desktop_validation_only && 'validate' || 'publish' }}"
+          status=0
+          reason="$(bash scripts/release/signpath-signing-ready.sh "$purpose" 2>&1 >/dev/null)" || status=$?
+          if [ "$status" -eq 0 ]; then
             echo "SIGNPATH_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
           else
             echo "SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
-            echo "::notice::${reason} Publishing an unsigned Windows runtime bundle."
+            if [ "$status" -eq 2 ]; then
+              echo "::warning::${reason} Publishing an unsigned Windows runtime bundle."
+            else
+              echo "::notice::${reason} Publishing an unsigned Windows runtime bundle."
+            fi
           fi
 
       # upload-artifact reduces multiple paths to their least common ancestor,
