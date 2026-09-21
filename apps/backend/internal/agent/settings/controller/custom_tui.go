@@ -115,6 +115,11 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		return nil, err
 	}
 
+	// A discovery sweep reports whatever the agent registry holds, and its
+	// results are cached, so a membership change has to drop that cache or the
+	// new agent is absent from Installed Agents until the TTL expires.
+	c.InvalidateDiscoveryCache()
+
 	profiles := []*models.AgentProfile{profile}
 	result := c.toAgentDTO(agent, profiles)
 	return &result, nil
@@ -173,6 +178,10 @@ func (c *Controller) SetCustomTUIAgentMCPStrategy(ctx context.Context, agentID, 
 		}
 		return nil, fmt.Errorf("failed to re-register agent: %w", err)
 	}
+	// The replacement instance reports a different SupportsMCP, and the sweep
+	// writes that flag back over the agent row: a cached sweep would revert the
+	// strategy change that just succeeded.
+	c.InvalidateDiscoveryCache()
 
 	return c.customTUIAgentDTO(ctx, agent)
 }

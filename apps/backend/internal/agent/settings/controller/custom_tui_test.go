@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -299,4 +301,108 @@ func TestSetCustomTUIAgentMCPStrategy_RejectsUnknownStrategy(t *testing.T) {
 	if stored := st.byName["guard-agent"]; stored.TUIConfig.MCPStrategy != mcpconfig.StrategyKeyNone {
 		t.Errorf("stored strategy = %q, want unchanged", stored.TUIConfig.MCPStrategy)
 	}
+}
+
+func newCustomTUIControllerWithDiscovery(t *testing.T, st *fakeStore) *Controller {
+	t.Helper()
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	agentRegistry := registry.NewRegistry(log)
+	discoveryRegistry, err := discovery.LoadRegistry(context.Background(), agentRegistry, log)
+	if err != nil {
+		t.Fatalf("load discovery registry: %v", err)
+	}
+	return &Controller{
+		agentRegistry: agentRegistry,
+		discovery:     discoveryRegistry,
+		repo:          st,
+		logger:        log,
+	}
+}
+
+func discoveryLists(t *testing.T, c *Controller, name string) bool {
+	t.Helper()
+	resp, err := c.ListDiscovery(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovery: %v", err)
+	}
+	return slices.ContainsFunc(resp.Agents, func(a dto.AgentDiscoveryDTO) bool {
+		return a.Name == name
+	})
+}
+
+// The Installed Agents list is rendered from the discovery sweep, so a custom
+// agent has to enter it on creation and leave it on deletion without a restart.
+// Both directions were broken while discovery kept its own copy of the agent
+// list: a deleted agent stayed listed (Rescan re-detected its binary from the
+// stale list) and a new one stayed missing.
+func TestCustomTUIAgentEntersAndLeavesDiscovery(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIControllerWithDiscovery(t, st)
+	ctx := context.Background()
+
+	if discoveryLists(t, c, "ghost-cli") {
+		t.Fatal("ghost-cli reported by discovery before it was created")
+	}
+
+	created, err := c.CreateCustomTUIAgent(ctx, CreateCustomTUIAgentRequest{
+		DisplayName: "Ghost CLI",
+		Command:     "ghost-cli",
+	})
+	if err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+	if !discoveryLists(t, c, "ghost-cli") {
+		t.Error("ghost-cli missing from discovery after it was created")
+	}
+
+	if err := c.DeleteAgent(ctx, created.ID); err != nil {
+		t.Fatalf("DeleteAgent: %v", err)
+	}
+	if discoveryLists(t, c, "ghost-cli") {
+		t.Error("ghost-cli still reported by discovery after it was deleted")
+	}
+}
+
+// Discovery writes SupportsMCP back over the agent row on every sweep, so a
+// strategy change that discovery cannot see is reverted by the next sweep.
+func TestCustomTUIAgentMCPStrategyChangeReachesDiscovery(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIControllerWithDiscovery(t, st)
+	ctx := context.Background()
+
+	created, err := c.CreateCustomTUIAgent(ctx, CreateCustomTUIAgentRequest{
+		DisplayName: "Strategy CLI",
+		Command:     "strategy-cli",
+	})
+	if err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+	if discoverySupportsMCP(t, c, "strategy-cli") {
+		t.Fatal("SupportsMCP = true before a strategy was selected")
+	}
+
+	if _, err := c.SetCustomTUIAgentMCPStrategy(ctx, created.ID, mcpconfig.StrategyKeyClaude); err != nil {
+		t.Fatalf("SetCustomTUIAgentMCPStrategy: %v", err)
+	}
+	if !discoverySupportsMCP(t, c, "strategy-cli") {
+		t.Error("SupportsMCP = false after selecting an MCP strategy")
+	}
+}
+
+func discoverySupportsMCP(t *testing.T, c *Controller, name string) bool {
+	t.Helper()
+	resp, err := c.ListDiscovery(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovery: %v", err)
+	}
+	for _, a := range resp.Agents {
+		if a.Name == name {
+			return a.SupportsMCP
+		}
+	}
+	t.Fatalf("%s missing from discovery", name)
+	return false
 }
