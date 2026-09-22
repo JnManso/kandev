@@ -17,7 +17,7 @@ ACP, REST, and MCP are different boundaries. ACP is the only structured agent pr
 
 ## Quick path
 
-1. Use **Add TUI Agent** for a local CLI, and pick its protocol there.
+1. Use **Add custom agent** for a local CLI, and pick its protocol there.
 2. Add a built-in `TUIAgent` only when every Kandev install needs it.
 3. Use a full ACP integration for structured chat, tools, models, modes, or resume.
 4. Validate the path you chose:
@@ -26,7 +26,7 @@ ACP, REST, and MCP are different boundaries. ACP is the only structured agent pr
 
 ## Register a local agent
 
-Open **Settings → Agents**, choose **Add TUI Agent**, and provide:
+Open **Settings → Agents**, choose **Add custom agent**, and provide:
 
 - a display name;
 - a protocol: **Terminal** or **ACP**;

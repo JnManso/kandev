@@ -367,15 +367,64 @@ func (c *Controller) adoptProbedModel(
 	if caps.CurrentModelID == "" {
 		return
 	}
-	profile, err := c.repo.GetAgentProfile(ctx, profileID)
-	if err != nil || profile == nil || profile.Model != "" {
+	adopter, ok := c.repo.(store.AgentProfileModelAdopter)
+	if !ok {
+		c.logger.Debug("profile store cannot adopt a probed model",
+			zap.String("profile_id", profileID))
 		return
 	}
-	profile.Model = caps.CurrentModelID
-	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
+	updated, err := adopter.UpdateAgentProfileModelIfEmpty(ctx, profileID, caps.CurrentModelID)
+	if err != nil {
 		c.logger.Debug("adopting the probed model failed",
 			zap.String("profile_id", profileID), zap.Error(err))
+		return
 	}
+	if updated {
+		c.broadcastProfileUpdated(ctx, profileID)
+	}
+}
+
+// broadcastProfileUpdated tells settings clients that background model
+// adoption changed a profile. Custom ACP profiles are global today, but keep
+// workspace routing here so this path cannot leak a scoped profile if the
+// creation flow gains workspace ownership later.
+func (c *Controller) broadcastProfileUpdated(ctx context.Context, profileID string) {
+	if c.hub == nil {
+		return
+	}
+	profile, err := c.repo.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		if err != nil {
+			c.logger.Debug("loading adopted profile for broadcast failed",
+				zap.String("profile_id", profileID), zap.Error(err))
+		}
+		return
+	}
+
+	profileDTO := toProfileDTO(profile)
+	c.decorateProviderSupportByAgentID(ctx, &profileDTO)
+	inferenceCapable := false
+	if agent, agentErr := c.repo.GetAgent(ctx, profile.AgentID); agentErr == nil && agent != nil && c.agentRegistry != nil {
+		_, inferenceCapable = c.agentRegistry.GetInferenceAgent(agent.Name)
+	}
+	notification, err := ws.NewNotification(ws.ActionAgentProfileUpdated, map[string]any{
+		"profile":           &profileDTO,
+		"inference_capable": inferenceCapable,
+	})
+	if err != nil {
+		c.logger.Debug("building adopted profile broadcast failed",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return
+	}
+	if profile.WorkspaceID != "" {
+		if workspaceHub, ok := c.hub.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		}); ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(profile.WorkspaceID, notification)
+		}
+		return
+	}
+	c.hub.Broadcast(notification)
 }
 
 func (c *Controller) initializeUpdateJobStore() {

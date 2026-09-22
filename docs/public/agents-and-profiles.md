@@ -187,7 +187,7 @@ uses the expected npm installation and configured registry. Run `npm config get 
 
 ### Add a custom terminal agent
 
-Use **Settings > Agents > Add TUI Agent** for a CLI that Kandev does not register. Enter a display name, a protocol, and a command. The entire command is split on whitespace with Go's `strings.Fields`.
+Use **Settings > Agents > Add custom agent** for a CLI that Kandev does not register. Enter a display name, a protocol, and a command. The entire command is split on whitespace with Go's `strings.Fields`.
 
 That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Test the exact resulting argument split before assigning it to work.
 
@@ -449,7 +449,7 @@ Workspace automation selectors do not offer passthrough agent profiles. Local ex
 
 ACP sessions can expose typed messages, tool updates, permission requests, models, modes, dynamic configuration, todos, usage, and resume metadata. Each capability depends on the agent's actual ACP implementation. ACP-only profile settings, including command prefixes and structured configuration, do not add those capabilities to a terminal-passthrough CLI.
 
-Passthrough preserves the CLI's native PTY interface. It is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom TUI profiles are locked to passthrough. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
+Terminal custom profiles use passthrough and preserve the CLI's native PTY interface. This is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom ACP profiles use structured ACP sessions. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
 
 > **MCP credential exposure:** MCP headers and environment values are stored in profile configuration. Codex may place them in process arguments, and Cursor or Pi may leave them in project files after teardown. Use short-lived, narrowly scoped credentials and review persisted files.
 

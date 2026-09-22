@@ -657,6 +657,67 @@ type profileUpdateSignalStore struct {
 	models chan string
 }
 
+// profileAdoptionRaceStore simulates a user changing the profile after a
+// background probe read it but before the probe can write. The conditional
+// model update sees that edit and must leave it untouched. The old full-row
+// read/modify/write path overwrote it.
+type profileAdoptionRaceStore struct {
+	*fakeStore
+	userEditInjected bool
+	fullRowWrites    int
+}
+
+func (s *profileAdoptionRaceStore) GetAgentProfile(
+	ctx context.Context,
+	profileID string,
+) (*models.AgentProfile, error) {
+	profile, err := s.fakeStore.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || s.userEditInjected {
+		return profile, err
+	}
+	s.userEditInjected = true
+	userEdit := copyProfile(profile)
+	userEdit.Model = "operator-choice"
+	if err := s.fakeStore.UpdateAgentProfile(ctx, userEdit); err != nil {
+		return nil, err
+	}
+	return profile, nil
+}
+
+func (s *profileAdoptionRaceStore) UpdateAgentProfile(
+	ctx context.Context,
+	profile *models.AgentProfile,
+) error {
+	s.fullRowWrites++
+	return s.fakeStore.UpdateAgentProfile(ctx, profile)
+}
+
+func (s *profileAdoptionRaceStore) UpdateAgentProfileModelIfEmpty(
+	ctx context.Context,
+	profileID, model string,
+) (bool, error) {
+	if !s.userEditInjected {
+		s.userEditInjected = true
+		current, err := s.fakeStore.GetAgentProfile(ctx, profileID)
+		if err != nil {
+			return false, err
+		}
+		current.Model = "operator-choice"
+		if err := s.fakeStore.UpdateAgentProfile(ctx, current); err != nil {
+			return false, err
+		}
+	}
+	current, err := s.fakeStore.GetAgentProfile(ctx, profileID)
+	if err != nil || current == nil || current.Model != "" {
+		return false, err
+	}
+	current.Model = model
+	if err := s.fakeStore.UpdateAgentProfile(ctx, current); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *profileUpdateSignalStore) UpdateAgentProfile(ctx context.Context, p *models.AgentProfile) error {
 	err := s.fakeStore.UpdateAgentProfile(ctx, p)
 	select {
@@ -664,6 +725,21 @@ func (s *profileUpdateSignalStore) UpdateAgentProfile(ctx context.Context, p *mo
 	default:
 	}
 	return err
+}
+
+func (s *profileUpdateSignalStore) UpdateAgentProfileModelIfEmpty(
+	ctx context.Context,
+	profileID, model string,
+) (bool, error) {
+	profile, err := s.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.Model != "" {
+		return false, err
+	}
+	profile.Model = model
+	if err := s.UpdateAgentProfile(ctx, profile); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func newProbedController(
@@ -722,5 +798,31 @@ func TestCreateCustomACPAgent_KeepsAnOperatorModel(t *testing.T) {
 	case model := <-st.models:
 		t.Errorf("overwrote the operator's model with %q", model)
 	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+func TestAdoptProbedModelDoesNotOverwriteConcurrentProfileEdit(t *testing.T) {
+	base := newFakeStore()
+	profile := &models.AgentProfile{AgentID: "agent-1", Name: "Default"}
+	if err := base.CreateAgentProfile(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	st := &profileAdoptionRaceStore{fakeStore: base}
+	c := newCustomTUIController(t, base)
+	c.repo = st
+
+	c.adoptProbedModel(context.Background(), profile.ID, hostutility.AgentCapabilities{
+		CurrentModelID: "probed-model",
+	})
+
+	got, err := base.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if got.Model != "operator-choice" {
+		t.Fatalf("model = %q, want concurrent operator edit to win", got.Model)
+	}
+	if st.fullRowWrites != 0 {
+		t.Fatalf("full-row writes = %d, want no full-row adoption write", st.fullRowWrites)
 	}
 }
