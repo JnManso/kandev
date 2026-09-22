@@ -180,9 +180,13 @@ uses the expected npm installation and configured registry. Run `npm config get 
 
 ### Add a custom terminal agent
 
-Use **Settings > Agents > Add TUI Agent** for a CLI that Kandev does not register. Enter a display name, command, and optional model label. `{{model}}` in the command is replaced by the selected model value, then the entire command is split on whitespace with Go's `strings.Fields`.
+Use **Settings > Agents > Add TUI Agent** for a CLI that Kandev does not register. Enter a display name, a protocol, and a command. The entire command is split on whitespace with Go's `strings.Fields`.
 
-That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Custom TUI agents always use terminal passthrough. They do not gain ACP features such as structured permission prompts, model discovery, modes, or session configuration merely by being added. Test the exact resulting argument split before assigning it to work.
+That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Test the exact resulting argument split before assigning it to work.
+
+A **Terminal** agent runs as passthrough. It also takes an optional model label, and `{{model}}` in the command is replaced by that value. It gains no ACP features: no structured permission prompts, no model discovery, no modes, no session configuration.
+
+An **ACP** agent is driven over the Agent Client Protocol instead, so it does get structured chat, tool calls, permission prompts, and probed models and modes. Enter the command that starts the CLI's ACP server, usually behind a flag such as `--acp`. Its model comes from the capability probe rather than the command, and its MCP servers travel in `session/new`, so neither the model label nor the MCP strategy is offered.
 
 </details>
 

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -405,4 +407,243 @@ func discoverySupportsMCP(t *testing.T, c *Controller, name string) bool {
 	}
 	t.Fatalf("%s missing from discovery", name)
 	return false
+}
+
+// A custom agent created as ACP must be seeded as a structured profile. A
+// passthrough profile launches the command under a PTY, which is what the
+// terminal protocol is for — with an ACP command that shows JSON-RPC frames.
+func TestCreateCustomACPAgent_SeedsStructuredProfile(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+
+	created, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "My Agent",
+		Command:     "my-agent --acp",
+		Protocol:    string(registry.CustomAgentProtocolACP),
+	})
+	if err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	ag, ok := c.agentRegistry.Get("my-agent")
+	if !ok {
+		t.Fatal("agent not registered")
+	}
+	if agents.IsPassthroughOnly(ag) {
+		t.Error("ACP custom agent registered as passthrough-only")
+	}
+
+	stored, ok := st.byName["my-agent"]
+	if !ok || stored.TUIConfig == nil {
+		t.Fatal("agent not persisted with a TUI config")
+	}
+	if stored.TUIConfig.Protocol != string(registry.CustomAgentProtocolACP) {
+		t.Errorf("stored protocol = %q, want %q", stored.TUIConfig.Protocol, registry.CustomAgentProtocolACP)
+	}
+	if !stored.SupportsMCP {
+		t.Error("stored SupportsMCP = false; ACP agents receive servers in session/new")
+	}
+
+	profiles := st.profiles[created.ID]
+	if len(profiles) != 1 {
+		t.Fatalf("seeded %d profiles, want 1", len(profiles))
+	}
+	if profiles[0].CLIPassthrough {
+		t.Error("seeded profile is CLI passthrough")
+	}
+	if profiles[0].Model == "passthrough" {
+		t.Error(`seeded profile model is "passthrough"; the capability probe fills it`)
+	}
+}
+
+// The terminal protocol is the default, and its seeding must not drift.
+func TestCreateCustomTUIAgent_DefaultsToTerminalProfile(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+
+	created, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Terminal CLI",
+		Command:     "terminal-cli",
+	})
+	if err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	stored, ok := st.byName["terminal-cli"]
+	if !ok || stored.TUIConfig == nil {
+		t.Fatal("agent not persisted with a TUI config")
+	}
+	if stored.TUIConfig.Protocol != "" {
+		t.Errorf("stored protocol = %q, want empty", stored.TUIConfig.Protocol)
+	}
+
+	profiles := st.profiles[created.ID]
+	if len(profiles) != 1 {
+		t.Fatalf("seeded %d profiles, want 1", len(profiles))
+	}
+	if !profiles[0].CLIPassthrough {
+		t.Error("seeded profile is not CLI passthrough")
+	}
+}
+
+func TestCreateCustomTUIAgent_RejectsUnknownProtocol(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+
+	_, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Bad Protocol",
+		Command:     "bad-protocol",
+		Protocol:    "websocket",
+	})
+	if !errors.Is(err, ErrUnknownCustomAgentProtocol) {
+		t.Fatalf("error = %v, want ErrUnknownCustomAgentProtocol", err)
+	}
+	if c.agentRegistry.Exists("bad-protocol") {
+		t.Error("agent registered despite an unknown protocol")
+	}
+}
+
+func TestCreateCustomACPAgent_RejectsMCPStrategy(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+
+	_, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "ACP With Strategy",
+		Command:     "acp-with-strategy --acp",
+		Protocol:    string(registry.CustomAgentProtocolACP),
+		MCPStrategy: mcpconfig.StrategyKeyClaude,
+	})
+	if !errors.Is(err, ErrMCPStrategyNotApplicable) {
+		t.Fatalf("error = %v, want ErrMCPStrategyNotApplicable", err)
+	}
+	if c.agentRegistry.Exists("acp-with-strategy") {
+		t.Error("agent registered despite an inapplicable MCP strategy")
+	}
+}
+
+// A stored ACP definition has to replay as an ACP agent after a restart;
+// creation, strategy changes, and the boot replay all build their spec here.
+func TestCustomAgentSpecFromStored_CarriesProtocol(t *testing.T) {
+	spec := CustomAgentSpecFromStored("my-agent", &models.TUIConfigJSON{
+		Command:     "my-agent --acp",
+		DisplayName: "My Agent",
+		Protocol:    string(registry.CustomAgentProtocolACP),
+	})
+
+	if spec.Protocol != registry.CustomAgentProtocolACP {
+		t.Errorf("spec.Protocol = %q, want %q", spec.Protocol, registry.CustomAgentProtocolACP)
+	}
+	if spec.Slug != "my-agent" {
+		t.Errorf("spec.Slug = %q, want %q", spec.Slug, "my-agent")
+	}
+}
+
+type probeRecordingHostUtility struct {
+	refreshed chan string
+}
+
+func (h *probeRecordingHostUtility) Get(string) (hostutility.AgentCapabilities, bool) {
+	return hostutility.AgentCapabilities{}, false
+}
+
+func (h *probeRecordingHostUtility) Refresh(
+	_ context.Context,
+	agentType string,
+) (hostutility.AgentCapabilities, error) {
+	select {
+	case h.refreshed <- agentType:
+	default:
+	}
+	return hostutility.AgentCapabilities{}, nil
+}
+
+func (h *probeRecordingHostUtility) ResolveModelConfig(
+	context.Context,
+	string,
+	hostutility.ModelConfigResolutionRequest,
+) (hostutility.ModelConfigResolution, error) {
+	return hostutility.ModelConfigResolution{}, nil
+}
+
+// An ACP agent's models and modes come from the capability probe, and the
+// probe only runs at boot. Without one kicked at creation, the profile editor
+// reports "not_configured" until the user finds the manual refresh.
+func TestCreateCustomACPAgent_ProbesCapabilities(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+	probe := &probeRecordingHostUtility{refreshed: make(chan string, 1)}
+	c.hostUtility = probe
+
+	if _, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Probed Acp",
+		Command:     "probed-acp --acp",
+		Protocol:    string(registry.CustomAgentProtocolACP),
+	}); err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	select {
+	case agentType := <-probe.refreshed:
+		if agentType != "probed-acp" {
+			t.Errorf("probed %q, want %q", agentType, "probed-acp")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no capability probe was kicked for a new ACP agent")
+	}
+}
+
+// A terminal agent is never probed, so kicking one would spawn the user's CLI
+// for nothing and park a failed capability status on the agent.
+func TestCreateCustomTUIAgent_DoesNotProbeCapabilities(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+	probe := &probeRecordingHostUtility{refreshed: make(chan string, 1)}
+	c.hostUtility = probe
+
+	if _, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Unprobed Terminal",
+		Command:     "unprobed-terminal",
+	}); err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	select {
+	case agentType := <-probe.refreshed:
+		t.Errorf("probed %q; terminal agents have no ACP server to probe", agentType)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// The MCP-strategy route is the one place a stored definition's protocol can be
+// paired with a new strategy. An ACP agent has no passthrough config file to
+// write, so the pair has to be refused before the row is touched rather than
+// written and rolled back.
+func TestSetCustomTUIAgentMCPStrategy_RejectedForACPAgent(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+	ctx := context.Background()
+
+	created, err := c.CreateCustomTUIAgent(ctx, CreateCustomTUIAgentRequest{
+		DisplayName: "Strategy Acp",
+		Command:     "strategy-acp --acp",
+		Protocol:    string(registry.CustomAgentProtocolACP),
+	})
+	if err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	if _, err := c.SetCustomTUIAgentMCPStrategy(ctx, created.ID, mcpconfig.StrategyKeyClaude); !errors.Is(err, ErrMCPStrategyNotApplicable) {
+		t.Fatalf("error = %v, want ErrMCPStrategyNotApplicable", err)
+	}
+
+	stored, ok := st.byName["strategy-acp"]
+	if !ok || stored.TUIConfig == nil {
+		t.Fatal("agent not persisted with a TUI config")
+	}
+	if stored.TUIConfig.MCPStrategy != "" {
+		t.Errorf("stored strategy = %q, want empty", stored.TUIConfig.MCPStrategy)
+	}
+	if !stored.SupportsMCP {
+		t.Error("SupportsMCP flipped off by a rejected strategy write")
+	}
 }
