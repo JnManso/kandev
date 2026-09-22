@@ -134,6 +134,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_WEB_PORT", class: "catalog"},
 		{envVar: "KANDEV_HEALTH_TIMEOUT_MS", class: "catalog"},
 		{envVar: "KANDEV_NO_BROWSER", class: "catalog"},
+		{envVar: "KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", class: "catalog"},
 		{envVar: InternalConfigFileEnv, class: "exclusion"},
 		{envVar: InternalConfigHomeFileEnv, class: "exclusion"},
 		{envVar: InternalAgentctlStartupConfigEnv, class: "exclusion"},
@@ -241,6 +242,7 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 		UnownedPeriod:             10 * time.Minute,
 		DetachedEventLimit:        100,
 		AgentSurvivalEnabled:      true,
+		PromptCancelJoinTimeout:   12 * time.Second,
 	}
 	raw, err := EncodeAgentctlStartupConfig(want)
 	if err != nil {
@@ -272,8 +274,15 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 	unset := want
 	unset.UnownedPeriod = 0
 	unset.DetachedEventLimit = 0
+	unset.PromptCancelJoinTimeout = 0
 	if _, err := EncodeAgentctlStartupConfig(unset); err != nil {
-		t.Fatalf("EncodeAgentctlStartupConfig rejected zero-valued (unset) survival tunables: %v", err)
+		t.Fatalf("EncodeAgentctlStartupConfig rejected zero-valued optional values: %v", err)
+	}
+
+	invalidCancelJoinTimeout := want
+	invalidCancelJoinTimeout.PromptCancelJoinTimeout = -time.Second
+	if _, err := EncodeAgentctlStartupConfig(invalidCancelJoinTimeout); err == nil {
+		t.Fatal("EncodeAgentctlStartupConfig accepted a negative prompt cancel join timeout")
 	}
 
 	invalidDetachedEventLimit := want
@@ -301,5 +310,29 @@ func TestManagedAgentctlStartupConfigReflectsAgentSurvivalFlag(t *testing.T) {
 	cfg.Features.AgentSurvival = true
 	if got := cfg.ManagedAgentctlStartupConfig(); !got.AgentSurvivalEnabled {
 		t.Fatal("AgentSurvivalEnabled = false, want true when the runtime flag is on")
+	}
+}
+
+func TestManagedAgentctlStartupConfigResolvesTruthyE2ECancelJoinTimeout(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "yes")
+	t.Setenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", "12s")
+	cfg := &Config{}
+	cfg.Agentctl.NotificationQueueCapacity = 4096
+	cfg.Agentctl.IdleReaperInterval = time.Minute
+
+	if got := cfg.ManagedAgentctlStartupConfig().PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("prompt cancel join timeout = %s, want 12s", got)
+	}
+}
+
+func TestManagedAgentctlStartupConfigOmitsCancelJoinTimeoutOutsideE2E(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "false")
+	t.Setenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", "12s")
+	cfg := &Config{}
+	cfg.Agentctl.NotificationQueueCapacity = 4096
+	cfg.Agentctl.IdleReaperInterval = time.Minute
+
+	if got := cfg.ManagedAgentctlStartupConfig().PromptCancelJoinTimeout; got != 0 {
+		t.Fatalf("prompt cancel join timeout = %s, want zero outside E2E", got)
 	}
 }

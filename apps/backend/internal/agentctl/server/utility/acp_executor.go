@@ -32,6 +32,7 @@ import (
 const (
 	openCodeCommand       = "opencode"
 	openCodeACPSubcommand = "acp"
+	kandevAgentGuardPath  = "/usr/local/bin/kandev-agent-guard"
 
 	acpCommandTerminateGrace = 250 * time.Millisecond
 	acpCommandForceKillGrace = 500 * time.Millisecond
@@ -82,22 +83,20 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		zap.String("model", model),
 		zap.Strings("command", args))
 
-	// Use resolvedCmd (not args[0]) so the allow-list literal is what reaches
-	// exec.Command for every built-in agent, and the one exception is the
-	// operator-defined command resolveSpawnCommand documents.
-	//nolint:gosec // resolvedCmd is an allow-list literal or an operator-registered command
 	cmdArgs := args[1:]
 	if len(cfg.CommandPrefix) > 0 {
 		args = append(append([]string{}, cfg.CommandPrefix...), args...)
-		resolvedCmd = resolveProbeCommand(args[0])
+		resolvedCmd = resolveACPCommandPrefix(args[0])
 		if resolvedCmd == "" {
 			return &PromptResponse{Success: false, Error: fmt.Sprintf("command prefix %q is not an allowed ACP command", args[0])}, nil
 		}
 		cmdArgs = args[1:]
 	}
 	cmdArgs = append(cmdArgs, cfg.CLIFlags...)
-	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
-	// the executable name is not derived from tainted input.
+	// Use resolvedCmd (not args[0]) so the executable name the taint tracker
+	// sees is an allow-list literal, a validated command prefix, or the
+	// operator-registered command resolveSpawnCommand documents.
+	//nolint:gosec // resolvedCmd is an allow-list literal, a validated prefix, or an operator-registered command
 	cmd := exec.CommandContext(ctx, resolvedCmd, cmdArgs...)
 	cmd.Dir = workDir
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
@@ -1294,6 +1293,18 @@ func resolveSpawnCommand(cfg *InferenceConfigDTO) (string, string) {
 		return "", fmt.Sprintf("command %q is not an allowed ACP probe command", command)
 	}
 	return resolved, ""
+}
+
+// resolveACPCommandPrefix validates the optional launcher that wraps an
+// already allow-listed ACP agent command. The deployment guard is accepted
+// only at its fixed image path: accepting a matching basename from another
+// directory would let a caller substitute an untrusted wrapper. Existing
+// allow-listed agent commands retain their prior prefix behavior.
+func resolveACPCommandPrefix(name string) string {
+	if name == kandevAgentGuardPath {
+		return kandevAgentGuardPath
+	}
+	return resolveProbeCommand(name)
 }
 
 // stderrTailLimit bounds how much of a spawned agent's stderr reaches the log:
