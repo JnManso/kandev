@@ -146,7 +146,9 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		CLIPassthrough:   true,
 	}
 	if acp {
-		profile.Model = ""
+		// The probe supplies a default when the operator named no model; it
+		// must not be the literal "passthrough" a terminal profile carries.
+		profile.Model = req.Model
 		profile.CLIPassthrough = false
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -161,7 +163,7 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		// An ACP agent's models and modes come from the capability probe, and
 		// the boot sweep is long past. A terminal agent has no ACP server to
 		// probe, so kicking one there would spawn the user's CLI for nothing.
-		c.kickCapabilityProbe(slug)
+		c.probeAndAdoptModel(slug, profile.ID)
 	}
 
 	profiles := []*models.AgentProfile{profile}

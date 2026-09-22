@@ -327,18 +327,55 @@ func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
 // ACP agent. Re-broadcasting availability afterwards moves any open profile
 // page out of "Probing…" without a manual refresh.
 func (c *Controller) kickCapabilityProbe(agentName string) {
+	c.probeAndAdoptModel(agentName, "")
+}
+
+// probeAndAdoptModel refreshes an agent's capabilities off the request path and,
+// when profileID names a profile, copies the probed default into it if it still
+// has no model.
+//
+// ProfileReconciler already fills an empty model from the probe, but it runs
+// once during startup (see backendapp/main.go), so an agent registered
+// afterwards would keep an empty model until the next restart and its sessions
+// would silently take whatever the agent defaults to.
+func (c *Controller) probeAndAdoptModel(agentName, profileID string) {
 	if c.hostUtility == nil {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if _, err := c.hostUtility.Refresh(ctx, agentName); err != nil {
+		caps, err := c.hostUtility.Refresh(ctx, agentName)
+		if err != nil {
 			c.logger.Debug("capability refresh failed",
 				zap.String("agent", agentName), zap.Error(err))
+		} else if profileID != "" {
+			c.adoptProbedModel(ctx, profileID, caps)
 		}
 		c.BroadcastAvailableAgents()
 	}()
+}
+
+// adoptProbedModel fills an empty profile model from the probe. A model the
+// operator already chose is left alone: overwriting it is exactly the silent
+// fallback the reconciler refuses to make.
+func (c *Controller) adoptProbedModel(
+	ctx context.Context,
+	profileID string,
+	caps hostutility.AgentCapabilities,
+) {
+	if caps.CurrentModelID == "" {
+		return
+	}
+	profile, err := c.repo.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.Model != "" {
+		return
+	}
+	profile.Model = caps.CurrentModelID
+	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
+		c.logger.Debug("adopting the probed model failed",
+			zap.String("profile_id", profileID), zap.Error(err))
+	}
 }
 
 func (c *Controller) initializeUpdateJobStore() {

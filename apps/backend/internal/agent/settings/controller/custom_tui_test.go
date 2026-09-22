@@ -540,6 +540,7 @@ func TestCustomAgentSpecFromStored_CarriesProtocol(t *testing.T) {
 
 type probeRecordingHostUtility struct {
 	refreshed chan string
+	caps      hostutility.AgentCapabilities
 }
 
 func (h *probeRecordingHostUtility) Get(string) (hostutility.AgentCapabilities, bool) {
@@ -554,7 +555,7 @@ func (h *probeRecordingHostUtility) Refresh(
 	case h.refreshed <- agentType:
 	default:
 	}
-	return hostutility.AgentCapabilities{}, nil
+	return h.caps, nil
 }
 
 func (h *probeRecordingHostUtility) ResolveModelConfig(
@@ -645,5 +646,81 @@ func TestSetCustomTUIAgentMCPStrategy_RejectedForACPAgent(t *testing.T) {
 	}
 	if !stored.SupportsMCP {
 		t.Error("SupportsMCP flipped off by a rejected strategy write")
+	}
+}
+
+// profileUpdateSignalStore publishes each profile model write. The probe runs
+// on its own goroutine, and fakeStore is not safe to read while it writes, so
+// tests synchronise on the write instead of polling the store.
+type profileUpdateSignalStore struct {
+	*fakeStore
+	models chan string
+}
+
+func (s *profileUpdateSignalStore) UpdateAgentProfile(ctx context.Context, p *models.AgentProfile) error {
+	err := s.fakeStore.UpdateAgentProfile(ctx, p)
+	select {
+	case s.models <- p.Model:
+	default:
+	}
+	return err
+}
+
+func newProbedController(
+	t *testing.T,
+	caps hostutility.AgentCapabilities,
+) (*Controller, *profileUpdateSignalStore) {
+	t.Helper()
+	st := &profileUpdateSignalStore{fakeStore: newFakeStore(), models: make(chan string, 4)}
+	c := newCustomTUIController(t, st.fakeStore)
+	c.repo = st
+	c.hostUtility = &probeRecordingHostUtility{refreshed: make(chan string, 1), caps: caps}
+	return c, st
+}
+
+// The seeded ACP profile carries no model on purpose: the probe is what learns
+// one. ProfileReconciler copies a probed default into an empty profile, but it
+// runs once during startup, so an agent registered afterwards would keep an
+// empty model until the next restart and its sessions would silently take
+// whatever the agent defaults to.
+func TestCreateCustomACPAgent_AdoptsProbedModel(t *testing.T) {
+	c, st := newProbedController(t, hostutility.AgentCapabilities{CurrentModelID: "probed-model"})
+
+	if _, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Adopting Acp",
+		Command:     "adopting-acp --acp",
+		Protocol:    string(registry.CustomAgentProtocolACP),
+	}); err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	select {
+	case model := <-st.models:
+		if model != "probed-model" {
+			t.Errorf("wrote model %q, want the probed default", model)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the probed model was never written to the seeded profile")
+	}
+}
+
+// A model the operator already chose is theirs. Overwriting it from the probe
+// is exactly the silent fallback the reconciler refuses to make.
+func TestCreateCustomACPAgent_KeepsAnOperatorModel(t *testing.T) {
+	c, st := newProbedController(t, hostutility.AgentCapabilities{CurrentModelID: "probed-model"})
+
+	if _, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Chosen Acp",
+		Command:     "chosen-acp --acp",
+		Protocol:    string(registry.CustomAgentProtocolACP),
+		Model:       "operator-choice",
+	}); err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	select {
+	case model := <-st.models:
+		t.Errorf("overwrote the operator's model with %q", model)
+	case <-time.After(500 * time.Millisecond):
 	}
 }
