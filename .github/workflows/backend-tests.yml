@@ -266,15 +266,10 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run.
-        #
-        # The timeout is sized for a cold analysis cache, not a warm one. A
-        # warm run finishes in well under a minute, but the module has grown
-        # past what 5m covers from cold, and the job then exits 4 with
-        # "Timeout exceeded" after reporting 0 issues. That was failing main's
-        # own pushes, so the ceiling is raised rather than the work trimmed.
+        # which would re-download its own binary on every run. Ten minutes
+        # leaves headroom for cold caches while still bounding analysis time.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=15m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
