@@ -22,7 +22,7 @@ test.describe("Custom ACP agent on mobile", () => {
 
     await protocol.tap();
     const listbox = testPage.getByRole("listbox");
-    const acpOption = listbox.getByRole("option").filter({ hasText: /^ACP$/ });
+    const acpOption = listbox.getByRole("option").filter({ hasText: /^ACP\b/i });
     await expect(acpOption).toBeVisible();
     await expect
       .poll(async () => (await acpOption.boundingBox())?.height ?? 0)
