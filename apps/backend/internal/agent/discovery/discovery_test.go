@@ -283,3 +283,70 @@ func TestRegistryDetectSkipsVirtualAgents(t *testing.T) {
 		t.Error("virtual agent reported as a discovery result")
 	}
 }
+
+// blockingDiscoveryAgent holds IsInstalled open until released, so a test can
+// invalidate the cache while a sweep is still in flight.
+type blockingDiscoveryAgent struct {
+	*discoveryTestAgent
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (a *blockingDiscoveryAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
+	a.once.Do(func() { close(a.entered) })
+	<-a.release
+	return a.discoveryTestAgent.IsInstalled(ctx)
+}
+
+// A sweep reads the registry when it starts and writes its results when it
+// finishes, so an unregister landing in between would otherwise be undone: the
+// finishing sweep caches the agent it saw, and the deleted card comes back for
+// a whole TTL.
+func TestRegistryDetectDropsResultsInvalidatedMidSweep(t *testing.T) {
+	log := newDiscoveryTestLogger(t)
+	reg := registry.NewRegistry(log)
+	blocking := &blockingDiscoveryAgent{
+		discoveryTestAgent: &discoveryTestAgent{
+			id:        "agent-a",
+			discovery: &agents.DiscoveryResult{Available: true},
+		},
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	if err := reg.Register(blocking); err != nil {
+		t.Fatalf("register agent-a: %v", err)
+	}
+	discoveryRegistry := loadDiscoveryRegistry(t, reg, log)
+
+	swept := make(chan []Availability, 1)
+	go func() {
+		results, err := discoveryRegistry.Detect(context.Background())
+		if err != nil {
+			t.Errorf("in-flight detect: %v", err)
+		}
+		swept <- results
+	}()
+
+	select {
+	case <-blocking.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sweep never reached IsInstalled")
+	}
+
+	if err := reg.Unregister("agent-a"); err != nil {
+		t.Fatalf("unregister agent-a: %v", err)
+	}
+	discoveryRegistry.InvalidateCache()
+	close(blocking.release)
+
+	select {
+	case <-swept:
+	case <-time.After(5 * time.Second):
+		t.Fatal("in-flight sweep never finished")
+	}
+
+	if slices.Contains(detectNames(t, discoveryRegistry), "agent-a") {
+		t.Error("a sweep that started before the invalidation published its stale results")
+	}
+}

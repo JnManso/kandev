@@ -49,6 +49,11 @@ type Registry struct {
 	cachedResults []Availability
 	cachedAt      time.Time
 	cacheTTL      time.Duration
+	// generation counts invalidations. A sweep reads the registry when it
+	// starts and writes its results when it finishes, so an invalidation can
+	// land in between; the sweep carries the generation it began with and
+	// discards its results when that no longer matches.
+	generation uint64
 }
 
 // LoadRegistry creates a new discovery registry backed by the agent registry.
@@ -83,11 +88,17 @@ func (r *Registry) Detect(ctx context.Context) ([]Availability, error) {
 		return cached, nil
 	}
 
+	r.mu.RLock()
+	startedAt := r.generation
+	r.mu.RUnlock()
+
 	results := r.detectAll(ctx)
 
 	r.mu.Lock()
-	r.cachedResults = results
-	r.cachedAt = time.Now()
+	if r.generation == startedAt {
+		r.cachedResults = results
+		r.cachedAt = time.Now()
+	}
 	r.mu.Unlock()
 
 	return results, nil
@@ -99,6 +110,7 @@ func (r *Registry) InvalidateCache() {
 	r.mu.Lock()
 	r.cachedResults = nil
 	r.cachedAt = time.Time{}
+	r.generation++
 	r.mu.Unlock()
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -934,8 +935,14 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		// so callers (e.g. onboarding) can omit it.
 		priority = defaultPriority
 	}
-	metadata := cloneTaskMetadata(req.Metadata)
-	delete(metadata, models.MetaKeyDeferredLaunch)
+	metadata := protectedTaskMetadataForCreate(req.Metadata, req.TrustedHandoffMetadata)
+	models.StripOfficeCarrierMetadata(metadata)
+	if len(req.OfficeCarrierMetadata) > 0 {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		maps.Copy(metadata, req.OfficeCarrierMetadata)
+	}
 	if req.DeferredLaunch != nil {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
@@ -2432,7 +2439,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false, preserveBranches: true}
 	cleanupJob, err := s.persistTaskResourceCleanup(
 		archiveCtx, id, models.TaskResourceCleanupTriggerArchive, "",
-		sessions, worktrees, stopTargets, nil, envCleanup, true, true, "",
+		sessions, worktrees, stopTargets, nil, envCleanup, true, true, task.WorkspaceID,
 	)
 	if err != nil {
 		return err
@@ -3101,7 +3108,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 		env: taskEnv, deleteRow: false, discardWorktreeChanges: options.DiscardWorktreeChanges,
 	}
 	cleanupJob, err := s.persistTaskResourceCleanup(
-		operationCtx, id, trigger, "", sessions, worktrees, stopTargets, attachments, envCleanup, true, true, "",
+		operationCtx, id, trigger, "", sessions, worktrees, stopTargets, attachments, envCleanup, true, true, task.WorkspaceID,
 	)
 	if err != nil {
 		return false, err

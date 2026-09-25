@@ -74,6 +74,12 @@ type WorktreeCleanupIdentityProvider interface {
 	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
 }
 
+// WorktreeArchiveSourceManifestProvider captures the archive-time source
+// evidence required before an owned checkout can be removed.
+type WorktreeArchiveSourceManifestProvider interface {
+	CaptureArchiveSourceManifests(ctx context.Context, worktrees []*worktree.Worktree) (map[string]worktree.ArchiveSourceManifest, error)
+}
+
 // WorktreeDirtyInspector reports local changes before a task deletion mutates
 // task rows or persists a cleanup job.
 type WorktreeDirtyInspector interface {
@@ -280,6 +286,17 @@ type WorkflowStepCreator interface {
 	CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error
 }
 
+// ExecutorSaveObserver is notified after an executor create or update
+// commits, with before the pre-update snapshot (nil on create) and after the
+// saved executor. CreateExecutor and UpdateExecutor are the only call sites
+// that can form this before/after comparison — before must be captured prior
+// to any in-place mutation of the loaded executor. Implementations decide for
+// themselves whether the save is worth acting on (e.g. only SSH executors
+// whose connection configuration changed).
+type ExecutorSaveObserver interface {
+	OnExecutorSaved(ctx context.Context, before, after *models.Executor)
+}
+
 // WorkspaceBootstrapper owns the atomic persistence of a standard Kanban
 // workspace and its initial workflow state.
 type WorkspaceBootstrapper interface {
@@ -324,6 +341,12 @@ type AgentProfileExecutorValidator interface {
 // checks, while the task service owns the move transaction.
 type WorkflowMovePreflight interface {
 	PreflightWorkflowStepMove(ctx context.Context, taskID string, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
+}
+
+// WorkflowChangeMovePreflight accepts the candidate task projection so
+// destination routing checks see the draft override map before it is persisted.
+type WorkflowChangeMovePreflight interface {
+	PreflightWorkflowStepChange(ctx context.Context, candidate *models.Task, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
 }
 
 // workflowStepLister is an optional extension used to find WIP steps that
@@ -501,6 +524,7 @@ type Service struct {
 	providerProber                  ProviderDefaultBranchProber
 	gitArchiveCapture               GitArchiveCapture
 	workflowStepCreator             WorkflowStepCreator
+	executorSaveObserver            ExecutorSaveObserver
 	workspaceBootstrapper           WorkspaceBootstrapper
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
@@ -928,6 +952,13 @@ func (s *Service) SetGitArchiveCapture(capture GitArchiveCapture) {
 // SetWorkflowStepCreator wires the workflow step creator for workflow creation.
 func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 	s.workflowStepCreator = creator
+}
+
+// SetExecutorSaveObserver wires the observer notified after every executor
+// create/update commits. Optional — a Service with no observer wired saves
+// executors exactly as before.
+func (s *Service) SetExecutorSaveObserver(observer ExecutorSaveObserver) {
+	s.executorSaveObserver = observer
 }
 
 func (s *Service) SetWorkspaceBootstrapper(bootstrapper WorkspaceBootstrapper) {
