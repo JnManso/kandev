@@ -39,6 +39,7 @@ func launchCustomACPWithStoredSession(t *testing.T, loadReply func(ws.Message) *
 		}
 		if err := msg.ParsePayload(&req); err != nil {
 			t.Errorf("parse session/load payload: %v", err)
+			return wsErrorReply(t, msg, ws.ErrorCodeBadRequest, "unparseable session/load payload")
 		}
 		mu.Lock()
 		loadedIDs = append(loadedIDs, req.SessionID)
@@ -82,11 +83,21 @@ func launchCustomACPWithStoredSession(t *testing.T, loadReply func(ws.Message) *
 	}
 }
 
-func loadErrorReply(message string) func(ws.Message) *ws.Message {
+func loadErrorReply(t *testing.T, message string) func(ws.Message) *ws.Message {
 	return func(msg ws.Message) *ws.Message {
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, message, nil)
-		return resp
+		return wsErrorReply(t, msg, ws.ErrorCodeInternalError, message)
 	}
+}
+
+// wsErrorReply builds the mock agentctl error reply. The handler runs on the
+// mock server's goroutine, where t.Fatalf is not allowed, so a construction
+// failure is reported with t.Errorf.
+func wsErrorReply(t *testing.T, msg ws.Message, code, message string) *ws.Message {
+	resp, err := ws.NewError(msg.ID, msg.Action, code, message, nil)
+	if err != nil {
+		t.Errorf("build %s error reply: %v", msg.Action, err)
+	}
+	return resp
 }
 
 // @covers AC-AGENTS-CUSTOM-ACP-002.1
@@ -133,7 +144,7 @@ func TestInitializeSession_CustomACPAgentRestoreFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			launch := launchCustomACPWithStoredSession(t, loadErrorReply(tt.loadError))
+			launch := launchCustomACPWithStoredSession(t, loadErrorReply(t, tt.loadError))
 
 			if !slices.Equal(launch.loadedIDs, []string{customACPStoredSessionID}) {
 				t.Fatalf("session/load IDs = %v, want [%s]", launch.loadedIDs, customACPStoredSessionID)
