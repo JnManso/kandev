@@ -24,6 +24,7 @@ Operators need to discover updates while working and optionally authorize Kandev
 - **AC-AGENTS-RUNTIME-NOTIFY-001.6:** Opening a runtime notification shall expand the runtime section and reveal its destination, including a disabled or unavailable runtime inside the additional registrations disclosure. Desktop and phone users shall be able to collapse and reopen the section without losing policy drafts. Phone controls shall have at least 44px touch targets and content shall not cause horizontal page overflow.
 
 - **AC-AGENTS-RUNTIME-NOTIFY-001.7:** Desktop and phone application views shall show no persistent floating agent runtime update button or count, including while newer runtimes are available. Runtime version management, ownership information, and manual guidance shall remain reachable through Settings > Agents and runtime notification links without hover.
+- **AC-AGENTS-RUNTIME-NOTIFY-001.8:** When a native host installation owns an agent and its managed fallback package has a validated operator selection, the fallback version control shall present that selection as the fallback's current version and classify the selected target against it, including after the completing job is gone or the dialog is reopened. Without a validated selection, the fallback current version shall remain explicitly unknown. The native host's observed version shall never be presented as the fallback's current version.
 
 ### REQ-AGENTS-RUNTIME-NOTIFY-002: Opt-in verified automatic updates
 
@@ -43,4 +44,4 @@ Model discovery, vendor credential/configuration migrations, hot-swapping sessio
 
 The [availability summary requirements](runtime-update-summary.md) extend startup and reconnect delivery under REQ-AGENTS-RUNTIME-NOTIFY-003.
 
-See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md), and [floating indicator removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md).
+See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md), [floating indicator removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md), and [managed fallback current version fix plan](../../../plans/managed-fallback-current-version/plan.md).

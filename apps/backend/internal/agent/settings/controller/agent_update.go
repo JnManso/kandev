@@ -74,14 +74,11 @@ func (c *Controller) previewAgentUpdate(
 		return nil, err
 	}
 
-	current := ""
-	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found && !fallback {
-		current = caps.AgentVersion
-	}
 	active, effective, defaultVersion, err := c.runtimeVersions(ctx, name, spec)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
+	current := managedCurrentVersion(c.runtimeUpdater, name, fallback, active)
 	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(
 		ctx, spec.Package, active, current, effective, defaultVersion,
 	)
@@ -178,6 +175,20 @@ func (c *Controller) resolveHarnessLatest(ctx context.Context, pkg string) (stri
 		return "", ErrRuntimeUpdaterUnavailable
 	}
 	return validateRuntimeUpdateLatest(resolver.ResolveHarnessLatest(ctx, pkg))
+}
+
+// managedCurrentVersion returns the observed version of the managed package.
+// Host capabilities describe a native installation in fallback mode, so the
+// fallback's observation is its active selection, which is persisted only
+// after the exact candidate passed its probe.
+func managedCurrentVersion(updater RuntimeUpdater, agentName string, fallback bool, active string) string {
+	if fallback {
+		return active
+	}
+	if caps, found := updater.CurrentCapabilities(agentName); found {
+		return caps.AgentVersion
+	}
+	return ""
 }
 
 func (c *Controller) managedRuntimeUpdateSpec(ag agents.Agent) (agents.ManagedNPMRuntimeSpec, bool, error) {

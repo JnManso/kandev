@@ -271,13 +271,6 @@ func (s *AgentUpdateJobStore) run(
 		s.finishFailed(job, ctx, fmt.Errorf("resolve target version: %w", err), ref)
 		return
 	}
-	currentVersion := ""
-	if caps, ok := s.updater.CurrentCapabilities(job.AgentName); ok && !job.ManagedFallback {
-		currentVersion = caps.AgentVersion
-		s.mu.Lock()
-		job.CurrentVersion = currentVersion
-		s.mu.Unlock()
-	}
 	activeVersion := ""
 	if s.selectionStore != nil {
 		selection, found, selectionErr := s.selectionStore.Get(ctx, job.AgentName, spec.Package)
@@ -289,6 +282,7 @@ func (s *AgentUpdateJobStore) run(
 			activeVersion = selection.Version
 		}
 	}
+	currentVersion := managedCurrentVersion(s.updater, job.AgentName, job.ManagedFallback, activeVersion)
 	defaultVersion := spec.DefaultVersionOrPinned()
 	effectiveVersion := defaultVersion
 	if activeVersion != "" {
@@ -302,6 +296,7 @@ func (s *AgentUpdateJobStore) run(
 		return
 	}
 	s.mu.Lock()
+	job.CurrentVersion = currentVersion
 	job.TargetVersion = target
 	job.Operation = operation
 	job.DefaultVersion = defaultVersion
