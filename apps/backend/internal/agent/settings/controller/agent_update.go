@@ -194,7 +194,8 @@ type managedVersionState struct {
 // fallback's observation is the version its last successful activation
 // validated, while that version is still effective. A selection is itself
 // persisted only after its probe passed, so it remains a valid observation when
-// no validation record names the effective version.
+// no validation record names the effective version or the store keeps no
+// validation records.
 func managedCurrentVersion(
 	ctx context.Context,
 	updater RuntimeUpdater,

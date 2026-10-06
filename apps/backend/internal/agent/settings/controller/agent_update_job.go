@@ -272,12 +272,11 @@ func (s *AgentUpdateJobStore) run(
 		return
 	}
 	activeVersion := ""
+	var selectionErr error
 	if s.selectionStore != nil {
-		selection, found, selectionErr := s.selectionStore.Get(ctx, job.AgentName, spec.Package)
-		if selectionErr != nil {
-			s.finishFailed(job, ctx, fmt.Errorf("read active runtime version: %w", selectionErr), ref)
-			return
-		}
+		var selection managedruntime.Selection
+		var found bool
+		selection, found, selectionErr = s.selectionStore.Get(ctx, job.AgentName, spec.Package)
 		if found {
 			activeVersion = selection.Version
 		}
@@ -287,10 +286,22 @@ func (s *AgentUpdateJobStore) run(
 	if activeVersion != "" {
 		effectiveVersion = activeVersion
 	}
-	currentVersion := managedCurrentVersion(ctx, s.updater, s.selectionStore, managedVersionState{
-		agentName: job.AgentName, packageName: spec.Package, fallback: job.ManagedFallback,
-		active: activeVersion, effective: effectiveVersion,
-	})
+	// A fallback observation depends on the effective version, which is unknown
+	// when the selection cannot be read; a host observation does not.
+	currentVersion := ""
+	if selectionErr == nil || !job.ManagedFallback {
+		currentVersion = managedCurrentVersion(ctx, s.updater, s.selectionStore, managedVersionState{
+			agentName: job.AgentName, packageName: spec.Package, fallback: job.ManagedFallback,
+			active: activeVersion, effective: effectiveVersion,
+		})
+	}
+	s.mu.Lock()
+	job.CurrentVersion = currentVersion
+	s.mu.Unlock()
+	if selectionErr != nil {
+		s.finishFailed(job, ctx, fmt.Errorf("read active runtime version: %w", selectionErr), ref)
+		return
+	}
 	operation, err := managedruntime.ClassifyEffectiveOperation(
 		job.UseDefault, activeVersion, effectiveVersion, currentVersion, target, defaultVersion,
 	)
@@ -299,7 +310,6 @@ func (s *AgentUpdateJobStore) run(
 		return
 	}
 	s.mu.Lock()
-	job.CurrentVersion = currentVersion
 	job.TargetVersion = target
 	job.Operation = operation
 	job.DefaultVersion = defaultVersion
@@ -500,7 +510,9 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 }
 
 // recordValidatedFallback persists the version a fallback activation probed.
-// The activation has already committed, so a failed write leaves the version
+// It records the exact target because that is the effective version after
+// activation, which managedCurrentVersion compares the record against. The
+// activation has already committed, so a failed write leaves the version
 // unknown rather than failing the job.
 func (s *AgentUpdateJobStore) recordValidatedFallback(ctx context.Context, agentName, packageName, version string) {
 	records, ok := s.selectionStore.(managedruntime.ValidatedVersionStore)

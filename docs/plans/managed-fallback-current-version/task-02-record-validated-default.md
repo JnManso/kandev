@@ -7,11 +7,9 @@ depends_on: ["01-fallback-current-version"]
 plan: "plan.md"
 requirements:
   - REQ-AGENTS-RUNTIME-NOTIFY-001
-  - REQ-AGENTS-RUNTIME-UPDATES-001
 acceptance_criteria:
   - AC-AGENTS-RUNTIME-NOTIFY-001.1
   - AC-AGENTS-RUNTIME-NOTIFY-001.8
-  - AC-AGENTS-RUNTIME-UPDATES-001.6
 system_design:
   - ../../specs/agents/system-design/runtime-update-notifications.md
 ---
@@ -24,6 +22,9 @@ After a successful **Use Kandev default** in fallback mode, the dialog must show
 the validated default as current instead of `Unknown`. Persist the version each
 successful fallback activation validated. Derive the fallback current version
 from that record while it equals the effective version.
+
+The task must keep AC-AGENTS-RUNTIME-UPDATES-001.6 true: the default is never
+persisted as an operator selection. The validation record is a separate key.
 
 ## Scope
 
@@ -137,3 +138,11 @@ Task 01 (done, rebased onto `origin/main` at `824dff704`).
 - `make -C apps/backend fmt` also reformatted four files inherited from main
   that are unrelated to this task. They were restored and are not part of this
   change.
+- PR review follow-up:
+  - The update job sets `CurrentVersion` again before the selection read can
+    fail, so a failed non-fallback job keeps the host version
+    (`TestAgentUpdateJobKeepsHostCurrentVersionWhenSelectionReadFails`). A
+    failed fallback read stays unknown, because the effective version is
+    unknown.
+  - The frontmatter now lists only the requirement that the linked design
+    declares. AC-AGENTS-RUNTIME-UPDATES-001.6 is kept as a stated constraint.
