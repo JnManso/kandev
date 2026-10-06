@@ -146,3 +146,12 @@ Task 01 (done, rebased onto `origin/main` at `824dff704`).
     unknown.
   - The frontmatter now lists only the requirement that the linked design
     declares. AC-AGENTS-RUNTIME-UPDATES-001.6 is kept as a stated constraint.
+- Merged `main` after OpenCode v2 adoption (#4014):
+  - The fallback derivation applies on the selection-store path.
+  - The new OpenCode selection path reports host capabilities, unchanged from
+    `main`, because it is not a managed fallback.
+  - Read failures now come wrapped from `activeRuntimeSelection`.
+  - The fallback tests use `opencode-ai` major-1 versions (1.18.30, the 1.18.32
+    default, and 1.19.0), because the catalogue now filters by family major.
+  - With the fallback derivation disabled, the three positive fallback tests
+    fail.

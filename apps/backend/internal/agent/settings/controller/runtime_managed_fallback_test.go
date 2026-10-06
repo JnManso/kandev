@@ -21,7 +21,7 @@ func TestNativeHostPreservesManagedFallbackSelectionAndRecovery(t *testing.T) {
 	t.Setenv("PATH", dir)
 	ag := agents.NewOpenCodeACP()
 	spec := ag.ManagedNPMRuntime()
-	updater := &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "9.0.0", Versions: []string{"9.0.0", "8.0.0", spec.DefaultVersionOrPinned()}}, currentFound: true, current: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "9.0.0"}}
+	updater := &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "1.19.0", Versions: []string{"1.19.0", "1.18.32", spec.DefaultVersionOrPinned()}}, currentFound: true, current: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.19.0"}}
 	c := newTestController(map[string]agents.Agent{ag.ID(): ag})
 	c.SetRuntimeUpdater(updater)
 	selection := newRecoverySelectionStore()
@@ -30,17 +30,17 @@ func TestNativeHostPreservesManagedFallbackSelectionAndRecovery(t *testing.T) {
 	c.SetJobBroadcaster(hub)
 	c.updateJobStore.onRefresh = nil
 	ctx := context.Background()
-	if err := selection.Save(ctx, ag.ID(), spec.Package, "8.0.0"); err != nil {
+	if err := selection.Save(ctx, ag.ID(), spec.Package, "1.18.32"); err != nil {
 		t.Fatal(err)
 	}
-	if item := c.buildRuntimeUpdateDTO(ctx, ag, true); item == nil || item.CurrentVersion != "" || item.EffectiveVersion != "8.0.0" {
+	if item := c.buildRuntimeUpdateDTO(ctx, ag, true); item == nil || item.CurrentVersion != "" || item.EffectiveVersion != "1.18.32" {
 		t.Fatalf("native host hid or misidentified managed fallback: %+v", item)
 	}
-	preview, err := c.PreviewAgentUpdate(ctx, ag.ID(), "9.0.0")
-	if err != nil || preview.CurrentVersion != "8.0.0" || !strings.Contains(preview.CommandString, "--package=opencode-ai@9.0.0") {
+	preview, err := c.PreviewAgentUpdate(ctx, ag.ID(), "1.19.0")
+	if err != nil || preview.CurrentVersion != "1.18.32" || !strings.Contains(preview.CommandString, "--package=opencode-ai@1.19.0") {
 		t.Fatalf("fallback preview: %+v,%v", preview, err)
 	}
-	for _, target := range []string{"9.0.0", "8.0.0", ""} {
+	for _, target := range []string{"1.19.0", "1.18.32", ""} {
 		var job *dto.AgentUpdateJobDTO
 		if target == "" {
 			job, err = c.EnqueueAgentUpdateUseDefault(ctx, ag.ID())
@@ -80,7 +80,7 @@ func TestManagedFallbackPreviewReportsValidatedSelectionAsCurrent(t *testing.T) 
 	t.Setenv("PATH", dir)
 	ag := agents.NewOpenCodeACP()
 	spec := ag.ManagedNPMRuntime()
-	updater := &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "9.0.0", Versions: []string{"9.0.0", "8.0.0", spec.DefaultVersionOrPinned()}}, currentFound: true, current: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "9.0.0"}}
+	updater := &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "1.19.0", Versions: []string{"1.19.0", "1.18.30", spec.DefaultVersionOrPinned()}}, currentFound: true, current: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.19.0"}}
 	c := newTestController(map[string]agents.Agent{ag.ID(): ag})
 	c.SetRuntimeUpdater(updater)
 	selection := newRecoverySelectionStore()
@@ -90,40 +90,40 @@ func TestManagedFallbackPreviewReportsValidatedSelectionAsCurrent(t *testing.T) 
 	c.updateJobStore.onRefresh = nil
 	ctx := context.Background()
 
-	preview, err := c.PreviewAgentUpdate(ctx, ag.ID(), "9.0.0")
+	preview, err := c.PreviewAgentUpdate(ctx, ag.ID(), "1.19.0")
 	if err != nil || preview.CurrentVersion != "" || preview.Operation != "repair" {
 		t.Fatalf("unselected fallback must stay unknown and repair: %+v,%v", preview, err)
 	}
 
-	if err := selection.Save(ctx, ag.ID(), spec.Package, "8.0.0"); err != nil {
+	if err := selection.Save(ctx, ag.ID(), spec.Package, "1.18.30"); err != nil {
 		t.Fatal(err)
 	}
-	for target, operation := range map[string]string{"9.0.0": "update", "8.0.0": "up_to_date"} {
+	for target, operation := range map[string]string{"1.19.0": "update", "1.18.30": "up_to_date"} {
 		preview, err = c.PreviewAgentUpdate(ctx, ag.ID(), target)
-		if err != nil || preview.CurrentVersion != "8.0.0" || preview.Operation != operation {
-			t.Fatalf("fallback preview %s: want current 8.0.0 and %s, got %+v,%v", target, operation, preview, err)
+		if err != nil || preview.CurrentVersion != "1.18.30" || preview.Operation != operation {
+			t.Fatalf("fallback preview %s: want current 1.18.30 and %s, got %+v,%v", target, operation, preview, err)
 		}
 	}
 
-	job, err := c.EnqueueAgentUpdate(ctx, ag.ID(), "9.0.0")
+	job, err := c.EnqueueAgentUpdate(ctx, ag.ID(), "1.19.0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitForUpdateStatus(t, hub.completed, job.JobID, dto.AgentUpdateJobStatusSucceeded)
-	preview, err = c.PreviewAgentUpdate(ctx, ag.ID(), "9.0.0")
-	if err != nil || preview.CurrentVersion != "9.0.0" || preview.Operation != "up_to_date" {
+	preview, err = c.PreviewAgentUpdate(ctx, ag.ID(), "1.19.0")
+	if err != nil || preview.CurrentVersion != "1.19.0" || preview.Operation != "up_to_date" {
 		t.Fatalf("reopened fallback preview after activation: %+v,%v", preview, err)
 	}
 	if caps, _ := updater.CurrentCapabilities(ag.ID()); caps.AgentVersion != "1.0.0" {
 		t.Fatalf("fallback published candidate as native host capabilities: %+v", caps)
 	}
 
-	job, err = c.EnqueueAgentUpdate(ctx, ag.ID(), "9.0.0")
+	job, err = c.EnqueueAgentUpdate(ctx, ag.ID(), "1.19.0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	finished := waitForUpdateStatus(t, hub.completed, job.JobID, dto.AgentUpdateJobStatusSucceeded)
-	if finished.Operation != "up_to_date" || finished.CurrentVersion != "9.0.0" {
+	if finished.Operation != "up_to_date" || finished.CurrentVersion != "1.19.0" {
 		t.Fatalf("selected fallback version must be up to date: %+v", finished)
 	}
 }
