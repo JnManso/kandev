@@ -106,9 +106,34 @@ non-fallback runtimes.
 ## Work orders
 
 - [Task 01: Report validated fallback version as current](task-01-fallback-current-version.md): done
+- [Task 02: Record the validated fallback version, including the default](task-02-record-validated-default.md): done
 
 Execution is sequential in the primary conversation. No subagents are
 authorized.
+
+## Follow-up from user testing (2026-10-06)
+
+Testing Task 01 showed a gap. After **Use Kandev default** succeeds, the dialog
+returns to `Unknown` with **Repair runtime**. Return-to-default validates the
+default before it deletes the selection, so this version is known. Task 01
+treated "no selection" as "never validated", which is wrong in this case. The
+user confirmed the rule: Unknown only when no successful activation has
+validated the version that future fallback launches use.
+
+Task 02 persists a validation record on every successful fallback activation,
+in the same settings namespace as the selection
+(`managed_runtime.validated.<agent>`), and derives the current version from it
+while it equals the effective version. A default changed by a Kandev upgrade is
+therefore unknown until it is validated again. The record is not an operator
+selection, so the default is still never persisted as a selection.
+
+UI-02: Reopened fallback dialog after a successful **Use Kandev default**
+(desktop and phone share `UpdateBody`):
+
+```text
+Before (user screenshot):  Repair runtime   Unknown → 1.18.34   [Repair runtime]
+After:                     Update runtime   1.18.32 → 1.18.34   [Update runtime]
+```
 
 ## Verification strategy
 
@@ -121,6 +146,10 @@ already covered by `agent-runtime-update-control.test.tsx` and
 `lib/agent-runtime-update.test.ts`. No new browser test is added.
 
 ## Risks
+
+- Task 02 adds one key per fallback agent to the install-wide settings store.
+  Records from a removed agent or package are ignored because reads check the
+  trusted package.
 
 - Same-version fallback repair is no longer offered once a selection is
   validated. Cache breakage for that version remains governed by managed npm

@@ -78,7 +78,9 @@ func (c *Controller) previewAgentUpdate(
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
-	current := managedCurrentVersion(c.runtimeUpdater, name, fallback, active)
+	current := managedCurrentVersion(ctx, c.runtimeUpdater, c.managedRuntimeSelections, managedVersionState{
+		agentName: name, packageName: spec.Package, fallback: fallback, active: active, effective: effective,
+	})
 	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(
 		ctx, spec.Package, active, current, effective, defaultVersion,
 	)
@@ -177,18 +179,41 @@ func (c *Controller) resolveHarnessLatest(ctx context.Context, pkg string) (stri
 	return validateRuntimeUpdateLatest(resolver.ResolveHarnessLatest(ctx, pkg))
 }
 
+// managedVersionState identifies the managed package whose current version is
+// being derived and the versions that future launches will use.
+type managedVersionState struct {
+	agentName   string
+	packageName string
+	fallback    bool
+	active      string
+	effective   string
+}
+
 // managedCurrentVersion returns the observed version of the managed package.
 // Host capabilities describe a native installation in fallback mode, so the
-// fallback's observation is its active selection, which is persisted only
-// after the exact candidate passed its probe.
-func managedCurrentVersion(updater RuntimeUpdater, agentName string, fallback bool, active string) string {
-	if fallback {
-		return active
+// fallback's observation is the version its last successful activation
+// validated, while that version is still effective. A selection is itself
+// persisted only after its probe passed, so it remains a valid observation when
+// no validation record names the effective version.
+func managedCurrentVersion(
+	ctx context.Context,
+	updater RuntimeUpdater,
+	selections managedruntime.SelectionStore,
+	state managedVersionState,
+) string {
+	if !state.fallback {
+		if caps, found := updater.CurrentCapabilities(state.agentName); found {
+			return caps.AgentVersion
+		}
+		return ""
 	}
-	if caps, found := updater.CurrentCapabilities(agentName); found {
-		return caps.AgentVersion
+	if records, ok := selections.(managedruntime.ValidatedVersionStore); ok {
+		record, found, err := records.GetValidated(ctx, state.agentName, state.packageName)
+		if err == nil && found && record.Version == state.effective {
+			return record.Version
+		}
 	}
-	return ""
+	return state.active
 }
 
 func (c *Controller) managedRuntimeUpdateSpec(ag agents.Agent) (agents.ManagedNPMRuntimeSpec, bool, error) {

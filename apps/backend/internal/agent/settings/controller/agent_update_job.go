@@ -282,12 +282,15 @@ func (s *AgentUpdateJobStore) run(
 			activeVersion = selection.Version
 		}
 	}
-	currentVersion := managedCurrentVersion(s.updater, job.AgentName, job.ManagedFallback, activeVersion)
 	defaultVersion := spec.DefaultVersionOrPinned()
 	effectiveVersion := defaultVersion
 	if activeVersion != "" {
 		effectiveVersion = activeVersion
 	}
+	currentVersion := managedCurrentVersion(ctx, s.updater, s.selectionStore, managedVersionState{
+		agentName: job.AgentName, packageName: spec.Package, fallback: job.ManagedFallback,
+		active: activeVersion, effective: effectiveVersion,
+	})
 	operation, err := managedruntime.ClassifyEffectiveOperation(
 		job.UseDefault, activeVersion, effectiveVersion, currentVersion, target, defaultVersion,
 	)
@@ -490,7 +493,25 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		job.EffectiveVersion = target
 	}
 	s.mu.Unlock()
+	if job.ManagedFallback {
+		s.recordValidatedFallback(ctx, job.AgentName, spec.Package, target)
+	}
 	s.finishActivated(job, target, ref)
+}
+
+// recordValidatedFallback persists the version a fallback activation probed.
+// The activation has already committed, so a failed write leaves the version
+// unknown rather than failing the job.
+func (s *AgentUpdateJobStore) recordValidatedFallback(ctx context.Context, agentName, packageName, version string) {
+	records, ok := s.selectionStore.(managedruntime.ValidatedVersionStore)
+	if !ok {
+		return
+	}
+	if err := records.SaveValidated(ctx, agentName, packageName, version); err != nil {
+		s.log.Warn("record validated managed fallback version",
+			zap.String("agent", agentName), zap.String("package", packageName),
+			zap.String("version", version), zap.Error(err))
+	}
 }
 
 const managedRuntimeUpdateDiagnosticLimit = 64 * 1024
