@@ -143,3 +143,41 @@ describe("doFetchMessages", () => {
     expect(lastFetchedSessionIdRef.current).toBeNull();
   });
 });
+
+describe("doFetchMessages background refresh", () => {
+  it("refreshes a transcript already on screen in the background without loading feedback", async () => {
+    const result = deferred<Message[]>();
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
+    const shown = [{ id: "m1" } as Message];
+    params.store = {
+      getState: () => ({
+        setMessagesLoading,
+        setMessages: vi.fn(),
+        messages: { bySession: { [SESSION_ID]: shown } },
+      }),
+    } as never;
+
+    // A recovery resets the fetched marker, so this is also its first fetch.
+    const fetch = doFetchMessages({ ...params, background: true } as never);
+    expect(params.setIsLoading).not.toHaveBeenCalledWith(true);
+    expect(params.setHistoryStatus).not.toHaveBeenCalledWith("loading");
+    expect(setMessagesLoading).toHaveBeenCalledWith(SESSION_ID, true);
+
+    result.resolve([]);
+    await fetch;
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(false);
+    expect(params.setHistoryStatus).toHaveBeenLastCalledWith("ready");
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
+  it("still shows loading feedback when a background refresh has nothing on screen", async () => {
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(vi.fn().mockResolvedValue([]), setMessagesLoading);
+
+    await doFetchMessages({ ...params, background: true } as never);
+
+    expect(params.setIsLoading).toHaveBeenCalledWith(true);
+    expect(params.setHistoryStatus).toHaveBeenCalledWith("loading");
+  });
+});

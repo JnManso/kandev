@@ -425,6 +425,8 @@ function useTerminalStateFetch(
       fetchAndStoreMessages,
       isActive,
       canFinalizeLoading: isCurrentGeneration,
+      // The transcript already streamed over WS; this only reconciles it.
+      background: true,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
     return deactivate;
@@ -1004,6 +1006,8 @@ function useCoreSessionRecovery({
           hydrationRef,
           hydrationKey,
           options: { force: true, authoritative: true },
+          // Gap recovery replaces the transcript in place; what is on screen stays visible.
+          background: true,
         }),
         ensureSessionTurnsLoaded(taskSessionId, store, {
           readiness,

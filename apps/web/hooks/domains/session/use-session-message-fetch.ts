@@ -104,6 +104,36 @@ function endSessionFetch(sessionId: string): boolean {
   return true;
 }
 
+function hasMessagesOnScreen(store: SessionMessageStore, sessionId: string): boolean {
+  return (store.getState().messages?.bySession?.[sessionId]?.length ?? 0) > 0;
+}
+
+function announceFetchStart({
+  taskSessionId,
+  store,
+  setIsLoading,
+  setHistoryStatus,
+  setHistoryError,
+  lastFetchedSessionIdRef,
+  background,
+}: Pick<
+  DoFetchMessagesParams,
+  | "taskSessionId"
+  | "store"
+  | "setIsLoading"
+  | "setHistoryStatus"
+  | "setHistoryError"
+  | "lastFetchedSessionIdRef"
+> & { background: boolean }): void {
+  const silent = background && hasMessagesOnScreen(store, taskSessionId);
+  if (!silent) setIsLoading(true);
+  if (lastFetchedSessionIdRef.current !== taskSessionId && !silent) {
+    setHistoryStatus("loading");
+    setHistoryError(null);
+  }
+  store.getState().setMessagesLoading(taskSessionId, true);
+}
+
 function isInactive(isActive?: () => boolean): boolean {
   return isActive !== undefined && !isActive();
 }
@@ -134,6 +164,8 @@ type DoFetchMessagesParams = {
   hydrationRef?: SessionHydrationRef;
   hydrationKey?: string;
   options?: MessageFetchOptions;
+  /** Reconciles a transcript already on screen without visible loading feedback. */
+  background?: boolean;
 };
 
 export type MessageFetchOptions = {
@@ -157,16 +189,19 @@ export async function doFetchMessages({
   hydrationRef,
   hydrationKey,
   options,
+  background = false,
 }: DoFetchMessagesParams): Promise<boolean> {
   if (isInactive(isActive)) return false;
   beginSessionFetch(taskSessionId);
-  setIsLoading(true);
-  const isInitialHistoryFetch = lastFetchedSessionIdRef.current !== taskSessionId;
-  if (isInitialHistoryFetch) {
-    setHistoryStatus("loading");
-    setHistoryError(null);
-  }
-  store.getState().setMessagesLoading(taskSessionId, true);
+  announceFetchStart({
+    taskSessionId,
+    store,
+    setIsLoading,
+    setHistoryStatus,
+    setHistoryError,
+    lastFetchedSessionIdRef,
+    background,
+  });
   if (initialFetchStartRef.current === null) {
     initialFetchStartRef.current = Date.now();
     setIsWaitingForInitialMessages(true);
