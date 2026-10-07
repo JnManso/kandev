@@ -1,0 +1,62 @@
+package main
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	acp "github.com/coder/acp-go-sdk"
+)
+
+// mockPromptSuggestion is the deterministic next-prompt suggestion the mock
+// agent emits for sessions that requested native suggestions.
+const mockPromptSuggestion = "Yes, run the tests"
+
+// mockNoSuggestionDirective suppresses the suggestion for one prompt.
+const mockNoSuggestionDirective = "/no-suggestion"
+
+// mockSuggestionDelay mirrors Claude Code, which emits the suggestion after
+// the turn result rather than inside it.
+const mockSuggestionDelay = 150 * time.Millisecond
+
+type extensionNotifier interface {
+	NotifyExtension(ctx context.Context, method string, params any) error
+}
+
+// promptSuggestionsRequested reports whether session _meta asks for Claude
+// Code prompt suggestions, mirroring claude-agent-acp's option passthrough.
+func promptSuggestionsRequested(meta map[string]any) bool {
+	claudeCode, _ := meta["claudeCode"].(map[string]any)
+	options, _ := claudeCode["options"].(map[string]any)
+	return options["promptSuggestions"] == true
+}
+
+func (a *mockAgent) recordPromptSuggestionRequest(sid acp.SessionId, meta map[string]any) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.promptSuggestionSessions == nil {
+		a.promptSuggestionSessions = make(map[acp.SessionId]bool)
+	}
+	a.promptSuggestionSessions[sid] = promptSuggestionsRequested(meta)
+}
+
+// emitPromptSuggestion sends the forwarded prompt_suggestion message the way
+// claude-agent-acp does for emitRawSDKMessages.
+func (a *mockAgent) emitPromptSuggestion(ctx context.Context, sid acp.SessionId, prompt string) {
+	a.mu.Lock()
+	requested := a.promptSuggestionSessions[sid]
+	notifier, ok := a.conn.(extensionNotifier)
+	a.mu.Unlock()
+	if !requested || !ok || strings.Contains(prompt, mockNoSuggestionDirective) {
+		return
+	}
+	_ = notifier.NotifyExtension(ctx, "_claude/sdkMessage", map[string]any{
+		"sessionId": string(sid),
+		"message":   map[string]any{"type": "prompt_suggestion", "suggestion": mockPromptSuggestion},
+	})
+}
+
+func (a *mockAgent) emitPromptSuggestionAfterResponse(sid acp.SessionId, prompt string) {
+	time.Sleep(mockSuggestionDelay)
+	a.emitPromptSuggestion(context.Background(), sid, prompt)
+}
