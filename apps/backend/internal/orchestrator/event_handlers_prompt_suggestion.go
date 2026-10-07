@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -54,7 +54,7 @@ type sessionMetadataStateGuard interface {
 // handlePromptSuggestionEvent binds a native suggestion to the session's latest
 // turn and publishes it. The write only lands while the session is waiting for
 // input, so a suggestion that loses the race with a newer prompt is dropped.
-func (s *Service) handlePromptSuggestionEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+func (s *Service) handlePromptSuggestionEvent(ctx context.Context, payload *runtimeapi.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil || payload.SessionID == "" {
 		return
 	}
