@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -48,5 +49,35 @@ func TestMockPromptSuggestionFollowsSessionMeta(t *testing.T) {
 	message, _ := payload["message"].(map[string]any)
 	if message["type"] != "prompt_suggestion" || message["suggestion"] != mockPromptSuggestion {
 		t.Fatalf("message = %#v, want prompt_suggestion %q", message, mockPromptSuggestion)
+	}
+}
+
+type closedSuggestionRecorder struct {
+	suggestionRecorder
+	done chan struct{}
+}
+
+func (r *closedSuggestionRecorder) Done() <-chan struct{} { return r.done }
+
+// TestMockPromptSuggestionStopsWhenConnectionCloses verifies the delayed
+// emission returns as soon as the connection is closed, without notifying.
+func TestMockPromptSuggestionStopsWhenConnectionCloses(t *testing.T) {
+	rec := &closedSuggestionRecorder{done: make(chan struct{})}
+	close(rec.done)
+	a := &mockAgent{conn: rec, sessions: map[acp.SessionId]bool{}}
+	a.recordPromptSuggestionRequest("s-on", promptSuggestionMeta())
+
+	returned := make(chan struct{})
+	go func() {
+		a.emitPromptSuggestionAfterResponse("s-on", "hello")
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(mockSuggestionDelay / 2):
+		t.Fatal("emission kept waiting after the connection closed")
+	}
+	if len(rec.methods) != 0 {
+		t.Fatalf("notifications = %v, want none after the connection closed", rec.methods)
 	}
 }
