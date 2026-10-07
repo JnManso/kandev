@@ -56,7 +56,35 @@ func (a *mockAgent) emitPromptSuggestion(ctx context.Context, sid acp.SessionId,
 	})
 }
 
+type connectionCloser interface {
+	Done() <-chan struct{}
+}
+
+// emitPromptSuggestionAfterResponse waits for the turn result to reach the
+// client, then emits the suggestion. It returns early when the connection closes.
 func (a *mockAgent) emitPromptSuggestionAfterResponse(sid acp.SessionId, prompt string) {
-	time.Sleep(mockSuggestionDelay)
-	a.emitPromptSuggestion(context.Background(), sid, prompt)
+	a.mu.Lock()
+	closer, _ := a.conn.(connectionCloser)
+	a.mu.Unlock()
+	var done <-chan struct{}
+	if closer != nil {
+		done = closer.Done()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	timer := time.NewTimer(mockSuggestionDelay)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+	}
+	go func() {
+		select {
+		case <-done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	a.emitPromptSuggestion(ctx, sid, prompt)
 }
