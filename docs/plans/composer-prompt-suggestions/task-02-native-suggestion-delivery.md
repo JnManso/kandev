@@ -160,11 +160,12 @@ Use `/acp-debug` for the manual adapter probe.
 
 ## Results
 
-Implemented in this repository. The `kdlbs/acp-go-sdk` change is committed
-locally on branch `feat/client-extension-notifications` (`2259551`). It is not
-published yet, and `go.mod` temporarily replaces the SDK with that local
-checkout. Publishing the fork branch and bumping the `replace` to its pseudo
-version needs explicit authorization, and blocks marking this work order done.
+Implemented in this repository. The SDK change (`2259551`) is published on
+`JnManso/acp-go-sdk` branch `feat/client-extension-notifications` and proposed
+upstream in kdlbs/acp-go-sdk#6. Until that merges, `go.mod` replaces the SDK with
+`github.com/JnManso/acp-go-sdk v0.13.6-0.20261006200825-2259551ab03d`. After it
+merges, the `replace` must move back to a `kdlbs/acp-go-sdk` pseudo version; that
+bump is what remains before this work order is done.
 
 Deviations from the original package, now reflected in the system design:
 
