@@ -148,4 +148,4 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 )
 
-replace github.com/coder/acp-go-sdk => /tmp/acp-go-sdk
+replace github.com/coder/acp-go-sdk => github.com/JnManso/acp-go-sdk v0.13.6-0.20261006200825-2259551ab03d
