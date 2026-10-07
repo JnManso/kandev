@@ -38,8 +38,8 @@ type PromptSuggestionEventPayload struct {
 	Text      string `json:"text"`
 }
 
-type sessionTurnLister interface {
-	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+type sessionLatestTurnReader interface {
+	GetLatestTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
 type sessionMetadataStateGuard interface {
@@ -88,15 +88,15 @@ func (s *Service) handlePromptSuggestionEvent(ctx context.Context, payload *runt
 }
 
 func (s *Service) latestSessionTurnID(ctx context.Context, sessionID string) string {
-	lister, ok := s.repo.(sessionTurnLister)
+	reader, ok := s.repo.(sessionLatestTurnReader)
 	if !ok {
 		return ""
 	}
-	turns, err := lister.ListTurnsBySession(ctx, sessionID)
-	if err != nil || len(turns) == 0 {
+	turn, err := reader.GetLatestTurnBySessionID(ctx, sessionID)
+	if err != nil || turn == nil {
 		return ""
 	}
-	return turns[len(turns)-1].ID
+	return turn.ID
 }
 
 // GetSessionID lets the WebSocket session broadcaster route the event.

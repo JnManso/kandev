@@ -101,6 +101,7 @@ describe("normalizeFallbackSuggestion", () => {
   it.each([
     ["  run the tests  ", "run the tests"],
     ['"commit this"', "commit this"],
+    ["\u201ccommit this\u201d", "commit this"],
     ["<suggestion>push it</suggestion>", "push it"],
     ["Suggestion: sim, corre os testes", "sim, corre os testes"],
   ])("accepts %j", (raw, want) => {
