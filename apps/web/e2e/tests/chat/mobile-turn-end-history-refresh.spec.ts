@@ -7,10 +7,9 @@ import {
   watchLoadingRows,
 } from "../../helpers/turn-end-history-refresh";
 
-// The mock agent reports token usage for this prompt, as real agents do every turn.
 const USAGE_PROMPT = "Reply briefly /with-usage";
 
-test("a conversation gap found after a turn is recovered without a loading row", async ({
+test("mobile idle recovery preserves transcript scroll without a loading row", async ({
   testPage,
   apiClient,
   seedData,
@@ -18,18 +17,26 @@ test("a conversation gap found after a turn is recovered without a loading row",
   test.setTimeout(120_000);
   const gap = await forceIdleConversationGap(testPage);
   gap.holdRecoveryResponse = true;
-  const session = await seedIdleSession(testPage, apiClient, seedData, "Silent gap recovery");
+  const session = await seedIdleSession(
+    testPage,
+    apiClient,
+    seedData,
+    "Mobile silent gap recovery",
+  );
   const loadingRowSeen = await watchLoadingRows(testPage);
 
   gap.armed = true;
-  await session.sendMessage(USAGE_PROMPT);
-  await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
-  // Wait for the matching successful response, then release it to the app.
+  await session.sendMessageViaButton(USAGE_PROMPT);
+  await expect.poll(() => gap.completed, { timeout: 30_000 }).toBe(true);
   await expect.poll(() => gap.recoveryResponseReceived, { timeout: 20_000 }).toBe(true);
+
+  const transcript = session.activeChat().locator(".chat-message-list");
+  const scrollTopBeforeApply = await transcript.evaluate((element) => element.scrollTop);
   gap.releaseRecoveryResponse();
   await expect.poll(() => gap.recovered, { timeout: 5_000 }).toBe(true);
   await waitForRecoveredMessagesApplied(testPage, gap);
-  await expect(session.activeChat().getByText(USAGE_PROMPT, { exact: true })).toBeVisible();
 
+  await expect(session.activeChat().getByText(USAGE_PROMPT, { exact: true })).toBeVisible();
   expect(await loadingRowSeen()).toBe(false);
+  expect(await transcript.evaluate((element) => element.scrollTop)).toBe(scrollTopBeforeApply);
 });
