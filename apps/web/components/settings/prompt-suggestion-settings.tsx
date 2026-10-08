@@ -11,6 +11,7 @@ import {
   type UtilityAgent,
 } from "@/lib/api/domains/utility-api";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
+import { cn } from "@/lib/utils";
 import { SettingsRow } from "./settings-group";
 import { SettingsInfo } from "./settings-info";
 import { SettingsFieldLabel } from "./settings-typography";
@@ -124,6 +125,10 @@ function useSuggestNextPromptBinding() {
   return { agent: draft, select, isDirty };
 }
 
+// Each dependent control sits one level in from the switch that reveals it.
+const FALLBACK_INDENT = "pl-4 md:pl-6";
+const PROFILE_INDENT = "pl-8 md:pl-12";
+
 function PromptSuggestionProfileField() {
   const { t } = useTranslation();
   const profiles = useAppStore((state) => state.agentProfiles.items);
@@ -136,7 +141,7 @@ function PromptSuggestionProfileField() {
   const selection = getBuiltinActionProfileSelection(agent);
   return (
     <div
-      className="space-y-2 py-2"
+      className={cn("space-y-2 py-2", PROFILE_INDENT)}
       data-settings-dirty={isDirty}
       data-testid="prompt-suggestion-profile"
     >
@@ -200,6 +205,7 @@ export function PromptSuggestionSettings() {
       />
       {draft.main && (
         <SettingsRow
+          className={FALLBACK_INDENT}
           label={t("settings:promptSuggestionsFallback")}
           description={t("settings:promptSuggestionsFallbackShort")}
           info={
