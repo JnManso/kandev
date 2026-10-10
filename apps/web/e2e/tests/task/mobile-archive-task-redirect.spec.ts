@@ -89,14 +89,14 @@ test.describe("Mobile archive task redirect", () => {
     });
     const documentRequestsBeforeArchive = documentRequests.length;
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const parentRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
     await expect(parentRow).toBeVisible({ timeout: 15_000 });
     await parentRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const archiveDialog = testPage.getByRole("alertdialog");
+    const archiveDialog = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
     await expect(archiveDialog).toBeVisible();
     await archiveDialog.getByTestId("archive-cascade-checkbox").tap();
     await archiveDialog.getByRole("button", { name: "Archive", exact: true }).tap();
@@ -108,7 +108,7 @@ test.describe("Mobile archive task redirect", () => {
     });
     expect(documentRequests).toHaveLength(documentRequestsBeforeArchive);
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const postArchiveDrawer = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       postArchiveDrawer.getByTestId("sidebar-task-item").filter({ hasText: parentTitle }),

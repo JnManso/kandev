@@ -1,13 +1,36 @@
 import { buildRestoreWorkspaceRequest } from "./session-launch-helpers";
-import { launchSession } from "./session-launch-service";
+import { launchSession, type LaunchSessionResponse } from "./session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError, type WebSocketRequestErrorDetails } from "@/lib/ws/client";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 export type SessionRecoveryAction =
   | "resume"
   | "resume_new_branch"
+  | "continue_from_history"
   | "fresh_start"
-  | "runtime_retry";
+  | "runtime_retry"
+  | "relocate_and_resume"
+  | "retry_connection";
+
+export type SessionRecoverySettingsPolicy = "provider_restored";
+
+export type SessionRecoveryRequest = {
+  taskId: string;
+  sessionId: string;
+  action: SessionRecoveryAction;
+  failureMessage: string;
+  errorStamp?: string | null;
+  settingsPolicy?: SessionRecoverySettingsPolicy;
+};
+
+const MANAGED_CLONE_RELOCATION_TIMEOUT_MS = 30 * 60 * 1000;
+
+export type ManagedCloneRelocationRecoveryDetails = WebSocketRequestErrorDetails & {
+  kind: "managed_clone_relocation_required" | "managed_clone_relocation_stale";
+  error_stamp?: string;
+  recovery_action?: "relocate_and_resume";
+};
 
 export type BranchRecoveryDetails = WebSocketRequestErrorDetails & {
   kind: "branch_unrecoverable";
@@ -18,7 +41,28 @@ export type BranchRecoveryDetails = WebSocketRequestErrorDetails & {
   session_id?: string;
 };
 
+export type SessionRecoveryGuardDetails = WebSocketRequestErrorDetails & {
+  kind: "session_recovery_in_progress" | "session_recovery_unstoppable";
+  retryable: boolean;
+  session_id?: string;
+};
+
+export type ContextContinuationDetails = WebSocketRequestErrorDetails & {
+  kind: "session_restore_required";
+  recovery_action: "continue_from_history";
+  reason?: string;
+  session_id?: string;
+  generation?: number;
+};
+
+export type RecoveryInspectionBusyDetails = WebSocketRequestErrorDetails & {
+  kind: "recovery_inspection_busy";
+};
+
 type RecoveryResponse = { success?: boolean; error?: string };
+type WorkspaceRecoveryStatusResponse = {
+  workspace_recovery?: WorkspaceRecoveryProjection | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -42,18 +86,99 @@ export function branchRecoveryDetails(error: unknown): BranchRecoveryDetails | n
   return error.details as BranchRecoveryDetails;
 }
 
+/** Returns the startup recovery guard's refusal reason, if the launch/recover was refused because of it. */
+export function sessionRecoveryGuardDetails(error: unknown): SessionRecoveryGuardDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (
+    error.details.kind !== "session_recovery_in_progress" &&
+    error.details.kind !== "session_recovery_unstoppable"
+  ) {
+    return null;
+  }
+  return error.details as SessionRecoveryGuardDetails;
+}
+
+/** Returns the typed conflict used when workspace inspection exhausts its wait budget. */
+export function recoveryInspectionBusyDetails(
+  error: unknown,
+): RecoveryInspectionBusyDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (error.details.kind !== "recovery_inspection_busy") return null;
+  return error.details as RecoveryInspectionBusyDetails;
+}
+
+/** Minimal shape both `useTranslation()`'s `t` and the module-level `t` satisfy. */
+type Translator = (key: string, options?: Record<string, unknown>) => string;
+
+/** Translates the guard's stable `kind` into the copy this session view shows. */
+export function sessionRecoveryGuardMessage(
+  details: SessionRecoveryGuardDetails,
+  t: Translator,
+): string {
+  if (details.kind === "session_recovery_in_progress") {
+    return t("task:sessionRecoveryGuardInProgress");
+  }
+  return t("task:sessionRecoveryGuardUnstoppable");
+}
+
+/** Translates the retryable inspection conflict without exposing transport text. */
+export function recoveryInspectionBusyMessage(t: Translator): string {
+  return t("task:workspaceRecoveryInspectionBusy");
+}
+
+export function managedCloneRelocationRecoveryDetails(
+  error: unknown,
+): ManagedCloneRelocationRecoveryDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (
+    error.details.kind !== "managed_clone_relocation_required" &&
+    error.details.kind !== "managed_clone_relocation_stale"
+  ) {
+    return null;
+  }
+  return error.details as ManagedCloneRelocationRecoveryDetails;
+}
+
+/** Resolves a thrown request failure to a user-facing message, preferring the
+ *  recovery guard's translated reason over the raw backend/transport text. */
+export function resolveRequestErrorMessage(
+  error: unknown,
+  t: Translator,
+  fallback = t("common:unknownError"),
+): string {
+  const guard = sessionRecoveryGuardDetails(error);
+  if (guard) return sessionRecoveryGuardMessage(guard, t);
+  if (recoveryInspectionBusyDetails(error)) return recoveryInspectionBusyMessage(t);
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
+/** Returns the structured native-state loss context that authorizes history continuation. */
+export function contextContinuationDetails(error: unknown): ContextContinuationDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (
+    error.details.kind !== "session_restore_required" ||
+    error.details.recovery_action !== "continue_from_history"
+  ) {
+    return null;
+  }
+  return error.details as ContextContinuationDetails;
+}
+
 /** Converts unknown request failures into an Error for an inline recovery alert. */
 export function asRecoveryError(error: unknown, fallback: string): Error {
   return error instanceof Error ? error : new Error(fallback);
 }
 
 /** Send one of the explicit session.recover actions. */
-export async function requestSessionRecover(
-  taskId: string,
-  sessionId: string,
-  action: SessionRecoveryAction,
-  failureMessage: string,
-): Promise<void> {
+export async function requestSessionRecover(options: SessionRecoveryRequest): Promise<void> {
+  const { taskId, sessionId, action, failureMessage, errorStamp, settingsPolicy } = options;
+  if (action === "relocate_and_resume" && !errorStamp) {
+    throw new Error(failureMessage);
+  }
+  if (settingsPolicy && action !== "resume") {
+    throw new Error(failureMessage);
+  }
   const client = getWebSocketClient();
   if (!client) throw new Error(failureMessage);
   const response = await client.request<RecoveryResponse>(
@@ -62,11 +187,29 @@ export async function requestSessionRecover(
       task_id: taskId,
       session_id: sessionId,
       action,
+      ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
+      ...(action === "resume" && settingsPolicy ? { settings_policy: settingsPolicy } : {}),
     },
-    30_000,
+    action === "relocate_and_resume" ? MANAGED_CLONE_RELOCATION_TIMEOUT_MS : 30_000,
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
+}
+
+/** Read current recovery state without reconstructing or inspecting the workspace. */
+export async function getWorkspaceRecoveryStatus(
+  taskId: string,
+  sessionId: string,
+  failureMessage: string,
+): Promise<WorkspaceRecoveryProjection | null> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(failureMessage);
+  const response = await client.request<WorkspaceRecoveryStatusResponse>(
+    "session.workspace_recovery.get",
+    { task_id: taskId, session_id: sessionId },
+    10_000,
+  );
+  return response.workspace_recovery ?? null;
 }
 
 /** Restore the existing task workspace without starting the provider. */
@@ -74,9 +217,10 @@ export async function restoreSessionWorkspace(
   taskId: string,
   sessionId: string,
   failureMessage: string,
-): Promise<void> {
+): Promise<LaunchSessionResponse> {
   const { request } = buildRestoreWorkspaceRequest(taskId, sessionId);
   const response = await launchSession(request);
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
+  return response;
 }

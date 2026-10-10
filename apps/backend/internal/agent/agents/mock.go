@@ -17,9 +17,10 @@ var mockLogoLight []byte
 var mockLogoDark []byte
 
 var (
-	_ Agent            = (*MockAgent)(nil)
-	_ PassthroughAgent = (*MockAgent)(nil)
-	_ InferenceAgent   = (*MockAgent)(nil)
+	_ Agent                         = (*MockAgent)(nil)
+	_ PassthroughAgent              = (*MockAgent)(nil)
+	_ InferenceAgent                = (*MockAgent)(nil)
+	_ OpenAICompatibleProviderAgent = (*MockAgent)(nil)
 )
 
 const (
@@ -173,9 +174,10 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		ProjectSkillDir: DefaultProjectSkillDir,
 		UserSkillDir:    ".mock-agent/skills",
 		SessionConfig: SessionConfig{
-			CanRecover:         &canRecover,
-			SessionDirTemplate: "{home}/.mock-agent",
-			SessionDirTarget:   "/root/.mock-agent",
+			NativeSessionResume: true,
+			CanRecover:          &canRecover,
+			SessionDirTemplate:  "{home}/.mock-agent",
+			SessionDirTarget:    "/root/.mock-agent",
 		},
 	}
 }
@@ -257,5 +259,16 @@ func (a *MockAgent) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   NewCommand(binary),
+	}
+}
+
+// OpenAICompatibleProvider lets a mock-agent profile exercise the
+// OpenAI-compatible provider primitive end to end in tests and e2e. It reuses
+// the same ACP gateway auth method shape as codex-acp.
+func (a *MockAgent) OpenAICompatibleProvider() *OpenAICompatibleProviderSpec {
+	return &OpenAICompatibleProviderSpec{
+		AuthMethodID: "gateway",
+		ProviderName: "Kandev",
+		KeyEnvVar:    "OPENAI_API_KEY",
 	}
 }

@@ -1,5 +1,152 @@
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
+import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
+import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
+import { parseTurnTimestamp } from "./turn-actions";
+
+function asMetadataRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function hasACPAttachmentChanged(existing: TaskSession, incoming: TaskSession): boolean {
+  const currentACP = asMetadataRecord(existing.metadata?.acp);
+  const incomingACP = asMetadataRecord(incoming.metadata?.acp);
+  const currentSessionID = typeof currentACP?.session_id === "string" ? currentACP.session_id : "";
+  const incomingSessionID =
+    typeof incomingACP?.session_id === "string" ? incomingACP.session_id : "";
+  return (
+    currentSessionID !== "" && incomingSessionID !== "" && currentSessionID !== incomingSessionID
+  );
+}
+
+function goalReconciliationForAttachment(
+  metadata: Record<string, unknown> | undefined,
+  revision: number,
+) {
+  const goal = getAgentGoal(metadata);
+  return {
+    revision,
+    cleared: goal === null,
+    watermark: goal ? { createdAt: goal.createdAt, updatedAt: goal.updatedAt } : null,
+  };
+}
+
+function mergeGoalReconciliation(
+  existing: TaskSession,
+  incoming: TaskSession,
+  mergedMetadata: TaskSession["metadata"],
+  attachmentChanged: boolean,
+) {
+  if (incoming.goal_reconciliation) return incoming.goal_reconciliation;
+  if (!attachmentChanged) {
+    const reconciliation = existing.goal_reconciliation;
+    const incomingUpdatedAt = readGoalSnapshotUpdatedAt(incoming);
+    if (
+      reconciliation &&
+      !reconciliation.cleared &&
+      hasIncomingGoalClear(incoming) &&
+      incomingUpdatedAt &&
+      isAgentGoalSnapshotNewer(incomingUpdatedAt, reconciliation)
+    ) {
+      return {
+        ...reconciliation,
+        revision: reconciliation.revision + 1,
+        cleared: true,
+        sourceUpdatedAt: incomingUpdatedAt,
+      };
+    }
+    return reconciliation;
+  }
+  const mergedACP = asMetadataRecord(mergedMetadata?.acp);
+  const mergedMeta = asMetadataRecord(mergedACP?.meta);
+  return goalReconciliationForAttachment(
+    mergedMeta,
+    (existing.goal_reconciliation?.revision ?? 0) + 1,
+  );
+}
+
+function readACPUpdatedAt(value: unknown): string | undefined {
+  const record = asMetadataRecord(value);
+  return typeof record?.updated_at === "string" ? record.updated_at : undefined;
+}
+
+function readGoalSnapshotUpdatedAt(session: TaskSession): string | undefined {
+  const candidates = [readACPUpdatedAt(session.metadata?.acp), session.updated_at];
+  let newest: string | undefined;
+  let newestTime: bigint | null = null;
+  for (const candidate of candidates) {
+    const candidateTime = parseTurnTimestamp(candidate);
+    if (candidateTime === null || (newestTime !== null && candidateTime <= newestTime)) continue;
+    newest = candidate;
+    newestTime = candidateTime;
+  }
+  return newest;
+}
+
+function hasIncomingGoalClear(session: TaskSession): boolean {
+  const acp = asMetadataRecord(session.metadata?.acp);
+  const meta = asMetadataRecord(acp?.meta);
+  return meta?.goal === null && Object.prototype.hasOwnProperty.call(meta ?? {}, "goal");
+}
+
+function mergeDeliveryRecoveryMetadata(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+  next: Record<string, unknown>,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(incoming, "agent_delivery_recovery")) return;
+  const currentRecovery = readAgentDeliveryRecovery(current);
+  const incomingRecovery = readAgentDeliveryRecovery(incoming);
+  if (
+    !currentRecovery ||
+    (incomingRecovery && incomingRecovery.revision >= currentRecovery.revision)
+  )
+    return;
+
+  // Keep the legacy error paired with the revisioned recovery snapshot.
+  next.agent_delivery_recovery = current.agent_delivery_recovery;
+  if (Object.prototype.hasOwnProperty.call(current, "last_agent_error")) {
+    next.last_agent_error = current.last_agent_error;
+  } else {
+    delete next.last_agent_error;
+  }
+}
+
+function mergeSessionMetadata(
+  existing: TaskSession,
+  incoming: TaskSession,
+): TaskSession["metadata"] {
+  if (incoming.metadata == null) return existing.metadata;
+  const current = existing.metadata ?? {};
+  const next = { ...current, ...incoming.metadata };
+  mergeDeliveryRecoveryMetadata(current, incoming.metadata, next);
+  const currentACP = asMetadataRecord(current.acp);
+  const incomingACP = asMetadataRecord(incoming.metadata.acp);
+  if (!currentACP && !incomingACP) return next;
+
+  const currentACPRecord = currentACP ?? {};
+  const incomingACPRecord = incomingACP ?? {};
+  const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
+  const mergedACP = { ...currentACPRecord, ...incomingACPRecord };
+  if (incoming.goal_reconciliation) {
+    mergedACP.meta = incomingACPRecord.meta;
+  } else if (incomingACPRecord.meta !== undefined || attachmentChanged) {
+    const currentMeta = asMetadataRecord(currentACPRecord.meta);
+    const incomingMeta = asMetadataRecord(incomingACPRecord.meta);
+    mergedACP.meta = mergeAgentGoalMetadata(currentMeta, incomingMeta, {
+      attachmentChanged,
+      source: "hydration",
+      reconciliation: existing.goal_reconciliation,
+      snapshotUpdatedAt: readGoalSnapshotUpdatedAt(incoming),
+    });
+  } else if (currentACPRecord.meta !== undefined) {
+    mergedACP.meta = currentACPRecord.meta;
+  }
+  next.acp = mergedACP;
+  return next;
+}
 
 /** Merge the runtime cancellation projection using its process-local revision. */
 function mergeCancellationProjection(
@@ -97,9 +244,26 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     existingRouteGeneration !== undefined &&
     (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
   const pendingAction = mergePendingActionProjection(existing, incoming);
+  const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
+  const merged = { ...existing, ...incoming };
+  merged.workspace_recovery = mergeWorkspaceRecoveryProjection(
+    existing.workspace_recovery,
+    incoming.workspace_recovery,
+    merged.task_environment_id,
+  );
+  merged.metadata = mergeSessionMetadata(existing, incoming);
+  const goalReconciliation = mergeGoalReconciliation(
+    existing,
+    incoming,
+    merged.metadata,
+    attachmentChanged,
+  );
+  if (goalReconciliation) merged.goal_reconciliation = goalReconciliation;
+  // A backend session update never carries the frontend-only projection owner.
+  // Its absence is the revocation signal for an optimistic resume rollback.
+  if (incoming.resume_projection_id === undefined) delete merged.resume_projection_id;
   return {
-    ...existing,
-    ...incoming,
+    ...merged,
     ...cancellation,
     ...parked,
     ...(routeIsStale
@@ -127,4 +291,73 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
   };
+}
+
+function compareDecimalIdentity(left: string, right: string): number | undefined {
+  if (!/^\d+$/.test(left) || !/^\d+$/.test(right)) return undefined;
+  const normalizedLeft = left.replace(/^0+(?=\d)/, "");
+  const normalizedRight = right.replace(/^0+(?=\d)/, "");
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  }
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+}
+
+function projectionForIdentityOrder(
+  existing: WorkspaceRecoveryProjection,
+  incoming: WorkspaceRecoveryProjection,
+  order: number | undefined,
+): WorkspaceRecoveryProjection | undefined {
+  if (order === undefined || order === 0) return undefined;
+  return order > 0 ? incoming : existing;
+}
+
+function sameRecoveryProjection(
+  left: WorkspaceRecoveryProjection,
+  right: WorkspaceRecoveryProjection,
+): boolean {
+  return (
+    Object.keys(left).length === Object.keys(right).length &&
+    Object.keys(left).every(
+      (key) =>
+        left[key as keyof WorkspaceRecoveryProjection] ===
+        right[key as keyof WorkspaceRecoveryProjection],
+    )
+  );
+}
+
+/** Merge an environment operation while preserving its generation and revision fences. */
+export function mergeWorkspaceRecoveryProjection(
+  existing: TaskSession["workspace_recovery"],
+  incoming: TaskSession["workspace_recovery"],
+  expectedEnvironmentId?: string,
+): TaskSession["workspace_recovery"] {
+  if (incoming === undefined) return existing;
+  if (incoming === null) return null;
+  if (expectedEnvironmentId && incoming.environment_id !== expectedEnvironmentId) {
+    return existing?.environment_id === expectedEnvironmentId ? existing : null;
+  }
+  if (!existing) return incoming;
+  if (existing.environment_id !== incoming.environment_id) return incoming;
+
+  const newerGeneration = projectionForIdentityOrder(
+    existing,
+    incoming,
+    compareDecimalIdentity(incoming.ownership_generation, existing.ownership_generation),
+  );
+  if (newerGeneration) return newerGeneration;
+  const newerRevision = projectionForIdentityOrder(
+    existing,
+    incoming,
+    compareDecimalIdentity(incoming.revision, existing.revision),
+  );
+  if (newerRevision) return newerRevision;
+  if (
+    existing.operation_id !== incoming.operation_id ||
+    existing.attempt_id !== incoming.attempt_id
+  ) {
+    return existing;
+  }
+  return sameRecoveryProjection(existing, incoming) ? existing : incoming;
 }

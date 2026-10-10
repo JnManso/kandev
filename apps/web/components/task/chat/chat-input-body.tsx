@@ -5,11 +5,13 @@ import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { cn } from "@/lib/utils";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TipTapInput } from "./tiptap-input";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
 import { ResizeHandle } from "./resize-handle";
 import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
+import { Button } from "@kandev/ui/button";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
@@ -20,6 +22,7 @@ import {
   useStablePluginComposerCapability,
 } from "@/lib/plugins/composer-capability";
 import type { PluginComposerCapability } from "@/lib/plugins/types";
+import { useComposerActivity, useComposerFocus } from "./composer-disclosure";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -140,6 +143,7 @@ function useChatPluginComposer(p: {
   identity: string;
   onSubmit: () => void;
 }): PluginComposerCapability {
+  const focus = useComposerFocus(p.inputRef);
   return useStablePluginComposerCapability(
     {
       insertText: (text) => {
@@ -147,13 +151,13 @@ function useChatPluginComposer(p: {
         if (!editor) return false;
         const insertion = composerInsertionText(text, editor.getCharBefore());
         if (!insertion) return false;
+        focus();
         editor.insertText(insertion, editor.getSelectionStart(), editor.getSelectionEnd());
-        editor.focus();
         return true;
       },
       focus: () => {
         if (!p.inputRef.current) return false;
-        p.inputRef.current.focus();
+        focus();
         return true;
       },
       // Revalidated at call time against the same gate the slot advertises as
@@ -178,6 +182,7 @@ function useChatPluginComposer(p: {
 }
 
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
+  useComposerActivity({ busy: Boolean(p.isEnhancingPrompt) });
   const { t } = useTranslation("chat");
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
   const { isDisabled, planModeEnabled, planModeAvailable, mcpServers } = p;
@@ -209,6 +214,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const submitDisabledReason = p.hasPendingAttachmentUploads
     ? t("chat:attachmentUploadPendingSubmit")
     : p.submitDisabledReason;
+  const pendingPlanReason = p.hasPendingAttachmentUploads ? submitDisabledReason : undefined;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -253,6 +259,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         isAgentBusy={isAgentBusy}
         canCancelAgent={p.canCancelAgent}
         hasContent={hasContent}
+        planActionDisabledReason={pendingPlanReason}
         isDisabled={p.submitDisabled}
         submitDisabledReason={submitDisabledReason}
         isSending={isSending}
@@ -285,15 +292,46 @@ export type ChatInputContextAreaProps = {
   hasContextZone: boolean;
   allItems: ContextItem[];
   sessionId: string | null;
+  scopeError?: boolean;
+  onRetryScope?: () => void;
 };
 
 export function ChatInputContextArea({
   hasContextZone,
   allItems,
   sessionId,
+  scopeError,
+  onRetryScope,
 }: ChatInputContextAreaProps) {
-  if (!hasContextZone) return null;
-  return <ContextZone items={allItems} sessionId={sessionId} />;
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  if (!hasContextZone && !scopeError) return null;
+  return (
+    <>
+      {hasContextZone && <ContextZone items={allItems} sessionId={sessionId} />}
+      {scopeError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-3 py-2 text-xs text-destructive"
+          data-testid="attachment-scope-error"
+        >
+          <span>{t("chat:attachmentWorkspaceUnavailable")}</span>
+          {onRetryScope && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={isFinePointer ? undefined : "min-h-11"}
+              onClick={onRetryScope}
+              data-testid="attachment-scope-retry"
+            >
+              {t("task:retry")}
+            </Button>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 export type ChatInputBodyProps = {
@@ -379,6 +417,11 @@ function useChatInputDrop(addFiles: (files: File[]) => Promise<void>) {
   return { handleDragEnter, handleDragLeave, handleDragOver, handleDrop, isDragging };
 }
 
+function useChatFocusHintVisibility(showFocusHint: boolean): boolean {
+  const { isMobile } = useResponsiveBreakpoint();
+  return showFocusHint && !isMobile;
+}
+
 export function ChatInputBody({
   containerRef,
   height,
@@ -396,6 +439,7 @@ export function ChatInputBody({
   editorAreaProps,
   promptResultRecovery,
 }: ChatInputBodyProps) {
+  const focusHintVisible = useChatFocusHintVisibility(showFocusHint);
   const glowClass = chatInputGlowClass(isAgentBusy, isStarting);
   const hasGlow = Boolean(glowClass);
   const drop = useChatInputDrop(addFiles);
@@ -428,7 +472,7 @@ export function ChatInputBody({
         onDragLeave={drop.handleDragLeave}
         onDrop={drop.handleDrop}
       >
-        <ChatInputFocusHint visible={showFocusHint} />
+        <ChatInputFocusHint visible={focusHintVisible} />
         <ChatInputContextArea {...contextAreaProps} />
         <div
           ref={containerRef}
@@ -438,7 +482,7 @@ export function ChatInputBody({
         >
           <ChatInputEditorArea
             {...editorAreaProps}
-            editorClassName={cn(editorAreaProps.editorClassName, showFocusHint && "pr-28")}
+            editorClassName={cn(editorAreaProps.editorClassName, focusHintVisible && "pr-28")}
           />
         </div>
       </div>

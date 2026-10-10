@@ -125,6 +125,7 @@ describe("agent update job websocket handlers", () => {
     const store = makeStore();
     const handlers = handlersFor(store);
     const snapshot = {
+      update_mode: "pinned",
       job_id: "update-1",
       agent_name: AGENT_NAME,
       status: "updating",
@@ -186,6 +187,22 @@ describe("agent profile events", () => {
 
     const stored = store.getState().agentProfiles.items[0];
     expect(stored?.model).toBe("new-model");
+  });
+
+  it("preserves event capability before the owning settings agent is hydrated", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+
+    handlers[PROFILE_CREATED](
+      message(PROFILE_CREATED, {
+        profile: profilePayload(),
+        inference_capable: true,
+      }),
+    );
+
+    expect(store.getState().settingsAgents.items).toHaveLength(0);
+    expect(store.getState().agentProfiles.items[0]?.inference_capable).toBe(true);
+    expect(store.getState().agentProfiles.version).toBe(1);
   });
 
   it("does not resurrect a deleted profile from a delayed create event", () => {

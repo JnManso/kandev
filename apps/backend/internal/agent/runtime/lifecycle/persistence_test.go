@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 type captureExecutorRunningWriter struct {
@@ -104,6 +105,27 @@ func TestBuildRunningFromExecutionPreservesPriorExecutorIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildRunningFromExecutionPersistsOfficeAgentProfileID(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		OfficeAgentProfileID: "office-profile-9",
+	}, nil)
+
+	if got := running.Metadata[MetadataKeyOfficeAgentProfileID]; got != "office-profile-9" {
+		t.Fatalf("Metadata[%q] = %v, want office-profile-9", MetadataKeyOfficeAgentProfileID, got)
+	}
+}
+
+func TestBuildRunningFromExecutionOmitsOfficeAgentProfileIDForNonOfficeLaunch(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+	}, nil)
+
+	if _, ok := running.Metadata[MetadataKeyOfficeAgentProfileID]; ok {
+		t.Fatal("Metadata should not carry an office_agent_profile_id key for a non-Office launch")
+	}
+}
+
 func TestBuildRunningFromExecutionBindsResumeTokenToExecutionProfile(t *testing.T) {
 	prior := &models.ExecutorRunning{
 		ExecutionProfileID: "codex-profile",
@@ -149,6 +171,22 @@ func TestPersistExecutorRunningRestoresRecoveredExecutionProfile(t *testing.T) {
 	if writer.running.ResumeToken != "claude-session" || writer.running.LastMessageUUID != "last-message" {
 		t.Fatalf("recovered resume state was cleared: %+v", writer.running)
 	}
+}
+
+func TestPersistExecutorRunningUsesTrackedExecutionStatus(t *testing.T) {
+	writer := &captureExecutorRunningWriter{}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "exec-tracked-status", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	mgr.executionStore.UpdateError(execution.ID, "agentctl not ready")
+
+	require.NoError(t, mgr.persistExecutorRunningResult(context.Background(), execution))
+	require.NotNil(t, writer.running)
+	require.Equal(t, models.ExecutorRunningStatusFailed, writer.running.Status)
 }
 
 func TestPersistExecutorRunningReturnsUpsertFailure(t *testing.T) {

@@ -4,9 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
+import { prepareCompactRuntimeFixture, type CompactRuntimeFixture } from "./compact-runtime";
 import { E2E_DOCKER_SCOPE } from "./docker-probe";
 import { dwell } from "../helpers/causal-waits";
 import { killProcessGroup } from "./process-group";
+import { writeGitShimLauncher } from "./git-shim-launcher";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -50,6 +52,8 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Active structured backend log for assertions that need Info records. */
+  logPath: string;
   /** Current backend PID, exposed for process-owned socket assertions. */
   pid: () => number | undefined;
   /**
@@ -71,6 +75,7 @@ export type BackendContext = {
    * every later restart until the returned release callback is awaited.
    */
   useEnv: (overrides: Record<string, string>) => Promise<() => Promise<void>>;
+  compactRuntime?: CompactRuntimeFixture;
 };
 
 function observeProcessExit(proc?: ChildProcess): {
@@ -178,6 +183,27 @@ type BackendFixtureLifecycle = {
   removeTempRoot?: (tmpDir: string) => void;
 };
 
+type BackendProcess = ChildProcess & {
+  waitForLogFile?: () => Promise<void>;
+};
+
+type LogFileStream = Pick<NodeJS.EventEmitter, "once" | "on">;
+
+export function observeLogFile(logFile: LogFileStream): () => Promise<void> {
+  let logFileError: Error | undefined;
+  const logFileClosed = new Promise<void>((resolve) => {
+    logFile.once("close", resolve);
+  });
+  logFile.on("error", (error: Error) => {
+    logFileError ??= error;
+  });
+
+  return async () => {
+    await logFileClosed;
+    if (logFileError) throw logFileError;
+  };
+}
+
 function removeOwnedTempRoot(tmpDir: string): void {
   fs.rmSync(tmpDir, {
     recursive: true,
@@ -189,18 +215,20 @@ function removeOwnedTempRoot(tmpDir: string): void {
 
 export async function runOwnedBackendFixture<T>(
   tmpDir: string,
-  run: (registerProcess: (proc: ChildProcess) => void) => Promise<T>,
+  run: (registerProcess: (proc: BackendProcess) => void) => Promise<T>,
   lifecycle: BackendFixtureLifecycle = {},
 ): Promise<T> {
   const stopProcess = lifecycle.stopProcess ?? killProcessGroup;
   const removeTempRoot = lifecycle.removeTempRoot ?? removeOwnedTempRoot;
-  let backendProc: ChildProcess | undefined;
+  let backendProc: BackendProcess | undefined;
+  const backendProcesses: BackendProcess[] = [];
   let result: T | undefined;
   const failures: unknown[] = [];
 
   try {
     result = await run((proc) => {
       backendProc = proc;
+      backendProcesses.push(proc);
     });
   } catch (error) {
     failures.push(error);
@@ -209,6 +237,15 @@ export async function runOwnedBackendFixture<T>(
   if (backendProc) {
     try {
       await stopProcess(backendProc);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  for (const proc of backendProcesses) {
+    if (!proc.waitForLogFile) continue;
+    try {
+      await proc.waitForLogFile();
     } catch (error) {
       failures.push(error);
     }
@@ -233,34 +270,41 @@ export async function runOwnedBackendFixture<T>(
  * The process is spawned with `detached: true` so it becomes a process group leader.
  */
 function spawnBackendProcess(
+  binaryPath: string,
   env: Record<string, string>,
   debug: boolean,
   port: number,
-): ChildProcess {
-  const proc = spawn(KANDEV_BIN, ["__backend"], {
+  logPath: string,
+): BackendProcess {
+  const proc = spawn(binaryPath, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
 
-  const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${port}.log`) : null;
-  proc.once("exit", () => {
-    logFile?.end();
-  });
+  const logFile = fs.createWriteStream(logPath, { flags: "a" });
+  const waitForLogFile = observeLogFile(logFile);
+  const closeLogFile = () => {
+    if (!logFile.writableEnded) logFile.end();
+  };
+  proc.once("close", closeLogFile);
+  proc.once("error", closeLogFile);
   proc.stderr?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
   proc.stdout?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend-log:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
 
-  return proc;
+  return Object.assign(proc, {
+    waitForLogFile,
+  });
 }
 
 /**
@@ -278,15 +322,19 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
       );
+      const processLogPath = path.join(tmpDir, "backend-process.log");
+      const backendLogPath = path.join(tmpDir, ".kandev", "logs", "backend-logs.log");
       let backendProc: ChildProcess | undefined;
 
       await runOwnedBackendFixture(tmpDir, async (registerProcess) => {
         const homeDir = path.join(tmpDir, ".kandev");
+        const systemTemporaryRoot = path.join(tmpDir, "system-temporary");
         const dbPath = path.join(tmpDir, "kandev.db");
         const worktreeBase = path.join(tmpDir, "worktrees");
         const repoCloneBase = path.join(tmpDir, "managed-repos");
 
         fs.mkdirSync(homeDir, { recursive: true });
+        fs.mkdirSync(systemTemporaryRoot, { recursive: true });
         fs.mkdirSync(worktreeBase, { recursive: true });
         fs.mkdirSync(repoCloneBase, { recursive: true });
 
@@ -313,7 +361,8 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // Install a `git` shim that can sleep on `fetch`/`pull` before execing
         // the real git binary. Tests that need to simulate slow network git
         // operations write a millisecond value to `${tmpDir}/git-delay-ms`; the
-        // shim reads it on every invocation and sleeps the matching duration.
+        // shim reads it on every fetch/pull and sleeps for that duration. A
+        // structured gate also holds clone operations for fresh worktrees.
         // When the file is absent the shim is a transparent passthrough, so
         // other tests in the same worker are unaffected.
         //
@@ -330,14 +379,26 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         const shimGitLabPushRecordFile = path.join(tmpDir, "gitlab-push-record");
         const originalPath = process.env.PATH ?? "";
         fs.mkdirSync(shimDir, { recursive: true });
-        writeGitShimLauncher(shimDir, shimScript);
+        writeGitShimLauncher(shimDir, shimScript, {
+          KANDEV_E2E_ORIGINAL_PATH: originalPath,
+          KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
+          KANDEV_E2E_GITLAB_PUSH_FILE: shimGitLabPushFile,
+          KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: shimGitLabPushRecordFile,
+        });
 
         // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
         // container execution. Default is off so the regular suite stays fast
         // and runs without a Docker daemon. See e2e/README.md.
         const dockerEnabled = isContainerProjectActive(workerInfo.project.name);
         const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
-        const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
+        const compactRuntime = dockerEnabled
+          ? prepareCompactRuntimeFixture({
+              bundleDir: path.join(tmpDir, "compact-runtime", "kandev"),
+              homeDir,
+              sourceBinDir: path.join(BACKEND_DIR, "bin"),
+              launcherPath: KANDEV_BIN,
+            })
+          : undefined;
 
         const backendEnv = {
           ...sanitizeInheritedEnv(process.env as Record<string, string>),
@@ -355,9 +416,11 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_E2E_GITLAB_REMOTE_URL: `http://localhost:${backendPort}/platform/kandev.git`,
           HOME: tmpDir,
           KANDEV_HOME_DIR: homeDir,
+          ...(compactRuntime ? { KANDEV_BUNDLE_DIR: compactRuntime.bundleDir } : {}),
           KANDEV_SERVER_PORT: String(backendPort),
           KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
           KANDEV_DATABASE_PATH: dbPath,
+          KANDEV_E2E_SYSTEM_TEMP_ROOT: systemTemporaryRoot,
           // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
           // apply the `e2e:` profile from profiles.yaml at startup —
           // which sets the mock agent and third-party provider flags,
@@ -369,19 +432,18 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // registry.RoutableProviderIDs).
           KANDEV_E2E_MOCK: "true",
           KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
-          // When Docker is on, point the lifecycle resolvers at the linux/amd64
-          // binaries the test runner pre-built, so containers can bind-mount them.
+          // Container-backed projects run from a standard package with only a
+          // verified linux/amd64 helper in the release-shaped cache.
           ...(dockerEnabled
             ? {
                 KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
-                KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
                 KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
               }
             : {}),
           KANDEV_WORKTREE_ENABLED: "true",
           KANDEV_WORKTREE_BASEPATH: worktreeBase,
           KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
-          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
+          KANDEV_LOG_LEVEL: dockerEnabled ? "debug" : (process.env.KANDEV_LOG_LEVEL ?? "info"),
           AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
           AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
           // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
@@ -411,7 +473,13 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         const scopedEnv = new BackendFixtureEnvOverrides();
 
         // --- Spawn backend ---
-        backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
+        backendProc = spawnBackendProcess(
+          compactRuntime?.launcherPath ?? KANDEV_BIN,
+          scopedEnv.apply(baselineEnv),
+          debug,
+          backendPort,
+          processLogPath,
+        );
         registerProcess(backendProc);
         // /ready (not /health) — /health flips green as soon as the listener
         // is bound, before routes are wired; tests that immediately issue API
@@ -438,7 +506,13 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
           // as soon as the port stops accepting connections (typically <200 ms).
           await waitForPortFree(backendPort);
-          backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
+          backendProc = spawnBackendProcess(
+            compactRuntime?.launcherPath ?? KANDEV_BIN,
+            nextEnv,
+            debug,
+            backendPort,
+            processLogPath,
+          );
           registerProcess(backendProc);
           // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
           // /ready, not /health — see the comment on the initial spawn above.
@@ -469,6 +543,8 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendPort,
           frontendUrl,
           tmpDir,
+          compactRuntime,
+          logPath: backendLogPath,
           pid: () => backendProc?.pid,
           restart,
           ensureReady,
@@ -480,33 +556,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
   ],
 });
 
-/**
- * Write a small launcher named `git` (POSIX) or `git.cmd` (Windows) into
- * `shimDir` that hands control to the Node `git-shim.mjs`. Kept minimal and
- * platform-specific because the interesting logic lives in the .mjs; this only
- * bridges a PATH `git` lookup to `node git-shim.mjs "$@"`. `process.execPath`
- * is the Node binary already running the E2E suite, so no separate Node install
- * is assumed on PATH.
- */
-function writeGitShimLauncher(shimDir: string, shimScript: string): void {
-  const node = process.execPath;
-  if (process.platform === "win32") {
-    // %* forwards all args verbatim; extensionless files aren't executable via
-    // PATHEXT on Windows, so a .cmd wrapper is required for exec.Command("git").
-    const launcher = `@echo off\r\n"${node}" "${shimScript}" %*\r\n`;
-    fs.writeFileSync(path.join(shimDir, "git.cmd"), launcher);
-    return;
-  }
-  // POSIX: an extensionless `git` shebang launcher. `#!/bin/sh` is only the
-  // launcher interpreter (guaranteed present on macOS/Linux) — the shim body is
-  // Node, so the developer's login shell (bash/zsh/fish) is irrelevant.
-  const launcher = `#!/bin/sh\nexec "${node}" "${shimScript}" "$@"\n`;
-  fs.writeFileSync(path.join(shimDir, "git"), launcher, { mode: 0o755 });
-}
-
 /** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
 // Sanitize the inherited environment before handing it to the e2e backend.
-// Three classes of vars must not leak through the `...process.env` spread:
+// Four classes of vars must not leak through the `...process.env` spread:
 //   - GitHub tokens — tests must hit the mock GitHub, never a real token.
 //   - KANDEV_FEATURES_* flags — these are profile-managed (profiles.yaml `e2e:`
 //     column turns them on). When the suite is launched from inside a kandev
@@ -522,12 +574,17 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
 //   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
 //     beside the fixture's new `PATH` makes child-process lookup order
 //     ambiguous. The caller restores one canonical PATH after sanitizing.
+//   - Remote helper paths — container-backed tests must exercise the standard
+//     package cache path, never an inherited helper override.
 function sanitizeInheritedEnv(env: Record<string, string>): Record<string, string> {
   const cleaned = { ...env };
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
   for (const key of Object.keys(cleaned)) {
     if (key === "KANDEV_WEB_TITLE_PREFIX" || key.startsWith("KANDEV_FEATURES_")) {
+      delete cleaned[key];
+    }
+    if (/^KANDEV_AGENTCTL_(?:LINUX_BINARY|(?:LINUX|DARWIN)_(?:AMD64|ARM64)_BINARY)$/i.test(key)) {
       delete cleaned[key];
     }
     if (key.toUpperCase() === "PATH") delete cleaned[key];

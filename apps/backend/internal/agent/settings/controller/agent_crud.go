@@ -27,12 +27,13 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 	if err := c.decorateAgentDTO(ctx, &result); err != nil {
 		return nil, err
 	}
 	c.applyCapabilityStatus(&result, agent.Name)
 	c.applyBillingType(&result, agent.Name)
+	c.applyProviderSupport(&result, agent.Name)
 	return &result, nil
 }
 
@@ -47,12 +48,13 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		if err != nil {
 			return nil, err
 		}
-		entry := toAgentDTO(agent, filterGlobalProfiles(profiles))
+		entry := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 		if err := c.decorateAgentDTO(ctx, &entry); err != nil {
 			return nil, err
 		}
 		c.applyCapabilityStatus(&entry, agent.Name)
 		c.applyBillingType(&entry, agent.Name)
+		c.applyProviderSupport(&entry, agent.Name)
 		payload = append(payload, entry)
 	}
 	c.sortAgentsByDisplayOrder(payload)
@@ -119,11 +121,14 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
-	Name          string
-	Model         string
-	FallbackModel string
-	AutoFallback  bool
-	Mode          string
+	Name                    string
+	Model                   string
+	FallbackModel           string
+	AutoFallback            bool
+	RequireExactModel       bool
+	CursorMCPAuthEnabled    *bool
+	CursorPluginsMCPEnabled *bool
+	Mode                    string
 	// CLIFlags is the explicit list to persist. When nil the list is seeded
 	// from the agent's curated PermissionSettings() catalogue (all disabled
 	// by default) so a fresh profile opens with the agent's suggestions.
@@ -182,7 +187,7 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, profiles)
+	result := c.toAgentDTO(agent, profiles)
 	c.applyCapabilityStatus(&result, agent.Name)
 	return &result, nil
 }
@@ -216,6 +221,16 @@ func (c *Controller) applyBillingType(d *dto.AgentDTO, agentName string) {
 	}
 }
 
+// applyProviderSupport populates the computed ProviderSupported flag on each
+// profile in the DTO from the registered agent implementation. Mirrors
+// applyBillingType — a read-time capability lookup, never persisted.
+func (c *Controller) applyProviderSupport(d *dto.AgentDTO, agentName string) {
+	supported := c.providerSupported(agentName)
+	for i := range d.Profiles {
+		d.Profiles[i].ProviderSupported = supported
+	}
+}
+
 func (c *Controller) findMatchedAvailability(name string, results []discovery.Availability) (*discovery.Availability, error) {
 	for _, result := range results {
 		if result.Name == name {
@@ -233,6 +248,9 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 // agent-create profile. Kept separate so CreateAgent can validate every profile
 // before inserting the agent row (avoiding an orphaned agent on a bad profile).
 func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
+	if err := validateRequireExactModelPolicy(p.Model, p.RequireExactModel, false, false); err != nil {
+		return err
+	}
 	if p.CLIFlags != nil {
 		if err := validateCLIFlagDTOs(p.CLIFlags); err != nil {
 			return err
@@ -255,16 +273,19 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			cliFlags = seedCLIFlags(agentConfig)
 		}
 		profile := &models.AgentProfile{
-			AgentID:          agentID,
-			Name:             profileReq.Name,
-			AgentDisplayName: displayName,
-			Model:            profileReq.Model,
-			FallbackModel:    strings.TrimSpace(profileReq.FallbackModel),
-			AutoFallback:     profileReq.AutoFallback,
-			Mode:             profileReq.Mode,
-			CLIFlags:         cliFlags,
-			EnvVars:          envVarsFromDTO(profileReq.EnvVars),
-			CommandPrefix:    strings.TrimSpace(profileReq.CommandPrefix),
+			AgentID:                 agentID,
+			Name:                    profileReq.Name,
+			AgentDisplayName:        displayName,
+			Model:                   profileReq.Model,
+			FallbackModel:           strings.TrimSpace(profileReq.FallbackModel),
+			AutoFallback:            profileReq.AutoFallback,
+			RequireExactModel:       profileReq.RequireExactModel,
+			CursorMCPAuthEnabled:    cursorMCPAuthEnabled(profileReq.CursorMCPAuthEnabled),
+			CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(profileReq.CursorPluginsMCPEnabled),
+			Mode:                    profileReq.Mode,
+			CLIFlags:                cliFlags,
+			EnvVars:                 envVarsFromDTO(profileReq.EnvVars),
+			CommandPrefix:           strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err
@@ -275,10 +296,11 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 }
 
 type UpdateAgentRequest struct {
-	ID            string
-	WorkspaceID   *string
-	SupportsMCP   *bool
-	MCPConfigPath *string
+	ID               string
+	WorkspaceID      *string
+	SupportsMCP      *bool
+	MCPConfigPath    *string
+	MCPConfigPathSet bool
 }
 
 func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*dto.AgentDTO, error) {
@@ -292,7 +314,13 @@ func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*
 	if req.SupportsMCP != nil {
 		agent.SupportsMCP = *req.SupportsMCP
 	}
-	if req.MCPConfigPath != nil {
+	if req.MCPConfigPathSet {
+		if req.MCPConfigPath == nil {
+			agent.MCPConfigPath = ""
+		} else {
+			agent.MCPConfigPath = *req.MCPConfigPath
+		}
+	} else if req.MCPConfigPath != nil {
 		agent.MCPConfigPath = *req.MCPConfigPath
 	}
 	if err := c.repo.UpdateAgent(ctx, agent); err != nil {
@@ -302,7 +330,7 @@ func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 	return &result, nil
 }
 
@@ -315,7 +343,8 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	if agent.TUIConfig != nil {
+	custom := agent.TUIConfig != nil
+	if custom {
 		_ = c.agentRegistry.Unregister(agent.Name)
 	}
 
@@ -324,6 +353,12 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 			return ErrAgentNotFound
 		}
 		return err
+	}
+	if custom {
+		// Installed Agents is rendered from the cached discovery sweep, which
+		// reports the registry. Without this the deleted agent keeps its card
+		// until the cache expires, and Rescan re-detects its binary.
+		c.InvalidateDiscoveryCache()
 	}
 	return nil
 }

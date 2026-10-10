@@ -7,6 +7,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { ActivityChip } from "@/app/coordinator/copilot/activity-chip";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -20,6 +21,8 @@ import {
 import { isLaunchErrorSurfaceMessage } from "./types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { MessageHistoryStatus } from "@/hooks/domains/session/use-message-fetch-state";
+import { SessionHistoryFeedback } from "./session-entry-feedback";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -33,6 +36,9 @@ export type MessageListProps = {
   messagesLoading: boolean;
   /** Latest-session history is still reconciling while cached rows remain visible. */
   historyRefreshPending?: boolean;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
@@ -55,6 +61,8 @@ export type MessageListProps = {
   /** Called whenever the first message stops being fully visible (`true`) or
    * becomes fully visible again (`false`). */
   onFirstMessageHiddenChange?: (isHidden: boolean) => void;
+  /** Called when transcript rows extend below the current viewport. */
+  onLatestVisibilityChange?: (isVisible: boolean) => void;
   /** Rendered as the first child inside the scroll container, sticky at its
    * top — the desktop-only, opt-in anchored last-prompt bar. `null`/`undefined`
    * when the setting is off or on mobile. */
@@ -84,6 +92,10 @@ export type MessageListHandle = {
     messageId: string,
     options?: { align?: "start" | "center"; behavior?: "smooth" | "auto" },
   ) => boolean;
+  /** Navigates to the newest rendered transcript content and takes focus. */
+  scrollToLatest: () => boolean;
+  /** Claims transcript position before async older-page navigation starts. */
+  claimReaderPosition?: () => void;
 };
 
 /** Render key for a transcript item: `item.id` for turn-group, prepare-
@@ -281,6 +293,20 @@ export function isElementFullyVisible(container: HTMLElement, target: HTMLElemen
   return t.top >= c.top - tolerance && t.bottom <= c.bottom + tolerance;
 }
 
+/** True when rendered transcript content extends below its viewport. */
+export function hasTranscriptContentBelowViewport(params: {
+  hasContent: boolean;
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  tolerance?: number;
+}): boolean {
+  return (
+    params.hasContent &&
+    params.scrollHeight - params.scrollTop - params.clientHeight > (params.tolerance ?? 8)
+  );
+}
+
 /** Pixel offset to reserve at the top of the transcript for the anchored
  * last-prompt bar's pinned overlay, so a scroll-into-view target (namely
  * the unread "New" divider) lands below it instead of underneath it.
@@ -429,6 +455,14 @@ export function LastAgentErrorNotice({
           <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
             {error.message}
           </pre>
+          {error.details && (
+            <details className="mt-2 min-w-0 text-[11px]" data-testid="last-agent-error-details">
+              <summary className="cursor-pointer font-medium">{t("task:technicalDetails")}</summary>
+              <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed text-destructive/85">
+                {error.details}
+              </pre>
+            </details>
+          )}
           {error.remediationUrl && (
             <div className="mt-1">
               <RemediationLink url={error.remediationUrl} className="text-destructive/85" />
@@ -437,7 +471,7 @@ export function LastAgentErrorNotice({
         </div>
         <button
           type="button"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-destructive/10 cursor-pointer"
+          className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-destructive/10 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           aria-label={t("task:hidePreviousAgentError")}
           onClick={dismiss}
         >
@@ -470,9 +504,31 @@ export function UnreadDivider() {
   );
 }
 
+function SessionHistoryStatus({
+  sessionId,
+  sessionState,
+  historyStatus,
+  historyError,
+  onRetryHistory,
+}: {
+  sessionId: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus: MessageHistoryStatus;
+  historyError: unknown;
+  onRetryHistory?: () => void;
+}) {
+  if (!sessionId || sessionState === "CREATED" || historyStatus === "ready" || !onRetryHistory) {
+    return null;
+  }
+  return (
+    <SessionHistoryFeedback status={historyStatus} error={historyError} onRetry={onRetryHistory} />
+  );
+}
+
 /** Transcript status footer: the loading-older indicator, an explicit
  * load-older button, the conversation loading spinner, and the empty-state
  * message when there are no messages. */
+// eslint-disable-next-line complexity -- transcript status owns independent loading, pagination, and recovery states.
 export function MessageListStatus({
   isLoadingMore,
   hasMore,
@@ -482,6 +538,11 @@ export function MessageListStatus({
   messagesCount,
   onLoadMore,
   showRecovery = false,
+  sessionId = null,
+  sessionState,
+  historyStatus = "ready",
+  historyError = null,
+  onRetryHistory,
 }: {
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -497,6 +558,11 @@ export function MessageListStatus({
   onLoadMore?: () => void;
   /** Shows the explicit control only after a recoverable pagination failure. */
   showRecovery?: boolean;
+  sessionId?: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
 }) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -521,7 +587,14 @@ export function MessageListStatus({
           </Button>
         </div>
       )}
-      {showLoadingState && (
+      <SessionHistoryStatus
+        sessionId={sessionId}
+        sessionState={sessionState}
+        historyStatus={historyStatus}
+        historyError={historyError}
+        onRetryHistory={onRetryHistory}
+      />
+      {showLoadingState && historyStatus === "ready" && (
         <div
           className="flex items-center justify-center py-8 text-muted-foreground"
           data-testid="conversation-loading-state"
@@ -530,11 +603,14 @@ export function MessageListStatus({
           <span>{t("task:loadingConversation")}</span>
         </div>
       )}
-      {!messagesLoading && !isInitialLoading && messagesCount === 0 && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <span>{t("task:noMessagesYetStartTheConversation")}</span>
-        </div>
-      )}
+      {!messagesLoading &&
+        !isInitialLoading &&
+        messagesCount === 0 &&
+        historyStatus === "ready" && (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <span>{t("task:noMessagesYetStartTheConversation")}</span>
+          </div>
+        )}
     </>
   );
 }
@@ -569,6 +645,22 @@ export const MessageItem = memo(function MessageItem({
   }
   if (item.type === "agent_error_notice") {
     return <LastAgentErrorNotice sessionId={item.sessionId} error={item.error} />;
+  }
+  if (item.type === "turn_group" && item.activityChip) {
+    return (
+      <ActivityChip
+        group={item}
+        chip={item.activityChip}
+        sessionId={sessionId}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        streamingMessageId={streamingMessageId}
+        onScrollToMessage={onScrollToMessage}
+      />
+    );
   }
   if (item.type === "turn_group") {
     const isContainingTurnActive = Boolean(activeTurnId && item.turnId === activeTurnId);

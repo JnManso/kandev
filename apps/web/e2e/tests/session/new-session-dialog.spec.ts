@@ -75,7 +75,7 @@ test.describe("New session dialog", () => {
     }
   });
 
-  test("completed sessions replace the composer with a New Agent action", async ({
+  test("completed sessions show Resume and New Agent actions", async ({
     testPage,
     apiClient,
     seedData,
@@ -117,7 +117,8 @@ test.describe("New session dialog", () => {
     await expect(session.completedSessionNewAgentButton()).toHaveText("New Agent");
     await expect(session.activeChat().locator(".tiptap.ProseMirror")).not.toBeVisible();
     await expect(session.submitButton()).not.toBeVisible();
-    await expect(session.recoveryResumeButton()).not.toBeVisible();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.recoveryResumeButton()).toHaveText("Resume");
     await expect(session.recoveryFreshButton()).not.toBeVisible();
 
     await session.completedSessionNewAgentButton().click();
@@ -165,14 +166,9 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("New Session Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 3. Open the API-created task directly; Kanban card virtualization is not
+    // part of the new-session dialog flow under test.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -219,14 +215,9 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Second Session Tab Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 3. Open the API-created task directly; Kanban card virtualization is
+    // unrelated to the new-session dialog flow.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -417,13 +408,7 @@ test.describe("New session dialog", () => {
     expect(envBefore).not.toBeNull();
 
     // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Env Reuse Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -489,12 +474,7 @@ test.describe("New session dialog", () => {
       .toBe(true);
 
     // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Cancel Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);

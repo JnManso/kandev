@@ -222,7 +222,7 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	launchCancel()
 
 	// Steps 1-3: Upload agentctl, credentials, prepare script
-	if err := r.stepSetupEnvironment(baseCtx, sprite, req, reconnect, report); err != nil {
+	if err := r.stepSetupEnvironment(baseCtx, sprite, req, reconnect, report, ctx); err != nil {
 		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
@@ -410,6 +410,7 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 	req *ExecutorCreateRequest,
 	reconnect bool,
 	report func(spritesStepKey, PrepareStep),
+	helperContexts ...context.Context,
 ) error {
 	if reconnect {
 		return nil
@@ -418,7 +419,12 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 	// Step 1: Upload agentctl binary
 	step := beginStep("Uploading agent controller")
 	report(spriteStepUploadAgentctl, step)
-	if err := r.uploadAgentctl(ctx, sprite); err != nil {
+	helperCtx := ctx
+	if len(helperContexts) > 0 && helperContexts[0] != nil {
+		helperCtx = helperContexts[0]
+	}
+	helperProgress := func(step PrepareStep, _, _ int) { report(spriteStepResolveAgentctl, step) }
+	if err := r.uploadAgentctl(ctx, helperCtx, sprite, helperProgress); err != nil {
 		completeStepError(&step, err.Error())
 		report(spriteStepUploadAgentctl, step)
 		return err
@@ -577,17 +583,17 @@ func (r *SpritesExecutor) buildInstanceResult(
 			agentctl.WithSessionID(req.SessionID)),
 		WorkspacePath: spritesWorkspacePath,
 		Metadata: map[string]interface{}{
-			MetadataKeySpriteName:      spriteName,
-			MetadataKeySpriteState:     strings.TrimSpace(sprite.Status),
-			MetadataKeySpriteCreatedAt: sprite.CreatedAt,
-			MetadataKeyLocalPort:       localPort,
-			"reuse_existing_process":   reusingExisting,
-			MetadataKeyIsRemote:        true,
+			MetadataKeySpriteName:           spriteName,
+			MetadataKeySpriteState:          strings.TrimSpace(sprite.Status),
+			MetadataKeySpriteCreatedAt:      sprite.CreatedAt,
+			MetadataKeyLocalPort:            localPort,
+			MetadataKeyReuseExistingProcess: reusingExisting,
+			MetadataKeyIsRemote:             true,
 		},
 	}
 }
 
-func (r *SpritesExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+func (r *SpritesExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 

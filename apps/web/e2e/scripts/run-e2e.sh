@@ -167,15 +167,12 @@ build_backend_host() {
   make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
 
-# Packages the plugin-fixture SDK plugin (cmd/plugin-fixture) into
-# .build/kandev-plugin-e2e-1.0.0.tar.gz for tests/plugins/plugins.spec.ts.
-# Always built on the host — like mock-agent, e2e/global-setup.ts only checks
-# this file exists (not that it's current), so it must be rebuilt any time
-# cmd/plugin-fixture changes (this runner always rebuilds it via build_fe's
-# sibling call below, unless --no-build is set).
+# Builds the external-style fixture UI from its sole source, then packages the
+# backend and UI with their immutable identity for every host/container run.
 build_plugin_package() {
-  log "packaging e2e fixture plugin"
-  make -C "$BACKEND_DIR" e2e-plugin-package >/dev/null || die "e2e plugin package build failed"
+  log "building and packaging e2e fixture plugin"
+  make -C "$BACKEND_DIR" e2e-plugin-ui e2e-plugin-package >/dev/null \
+    || die "e2e plugin package build failed"
 }
 
 backend_runs_in() {  # $1=image — does the host-built binary run there? (glibc check, ~2s)
@@ -318,6 +315,23 @@ run_docker() {
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
   local container_flag=()
   is_container_project && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
+  local coordinator_mount=() observer_mount=() requires_coordinator=0 requires_observer=0
+  for arg in "${PW_ARGS[@]}"; do
+    case "$arg" in
+      *reference-coordinator*|*coordinator-compatibility*) requires_coordinator=1 ;;
+      *reference-observer*|*coordinator-compatibility*) requires_observer=1 ;;
+    esac
+  done
+  if [[ "$requires_coordinator" == 1 ]]; then
+    [[ -d "$REPO_ROOT/../kandev-plugin-coordinator-template" ]] \
+      || die "reference coordinator checkout is required at $REPO_ROOT/../kandev-plugin-coordinator-template"
+    coordinator_mount=(-v "$REPO_ROOT/../kandev-plugin-coordinator-template:/work/kandev-plugin-coordinator-template:ro")
+  fi
+  if [[ "$requires_observer" == 1 ]]; then
+    [[ -d "$REPO_ROOT/../kandev-plugin-observer" ]] \
+      || die "reference observer checkout is required at $REPO_ROOT/../kandev-plugin-observer"
+    observer_mount=(-v "$REPO_ROOT/../kandev-plugin-observer:/work/kandev-plugin-observer:ro")
+  fi
   local capture_flag=()
   [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
   local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\" --workers=1"
@@ -327,6 +341,8 @@ run_docker() {
     [[ "$i" != 0 ]] && shardflag="--shard=$i/$SHARDS"
     docker run --rm --ipc=host \
       -v "$REPO_ROOT":/work -w /work/apps/web \
+      ${coordinator_mount[@]+"${coordinator_mount[@]}"} \
+      ${observer_mount[@]+"${observer_mount[@]}"} \
       ${strict_flag[@]+"${strict_flag[@]}"} \
       ${container_flag[@]+"${container_flag[@]}"} \
       ${capture_flag[@]+"${capture_flag[@]}"} \

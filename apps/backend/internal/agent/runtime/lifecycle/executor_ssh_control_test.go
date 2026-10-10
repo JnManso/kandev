@@ -218,6 +218,7 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 		Metadata: map[string]interface{}{
 			MetadataKeyBaseBranches: map[string]string{"repo-a": "develop"},
 		},
+		DurableJournalOwnerID: "environment-9",
 	}
 
 	got := buildSSHCreateInstanceRequest(req, "/remote/task", "/remote/agentctl")
@@ -227,6 +228,9 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 	}
 	if got.WorkspacePath != "/remote/task" {
 		t.Fatalf("WorkspacePath = %q", got.WorkspacePath)
+	}
+	if got.DurableJournalPath != "/remote/task/.kandev/agentctl-journals/environment-9/delivery.bbolt" {
+		t.Fatalf("DurableJournalPath = %q", got.DurableJournalPath)
 	}
 	if got.AgentType != "opencode" {
 		t.Fatalf("AgentType = %q", got.AgentType)
@@ -249,8 +253,47 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 	if got.Env[envKeyOpenAIAPIKey] != "sk-1" {
 		t.Fatalf("Env = %+v, want the allowlisted key", got.Env)
 	}
+	if got.Env[envKeyKandevCLI] != "/remote/agentctl" {
+		t.Fatalf("KANDEV_CLI = %q, want the remote agentctl path", got.Env[envKeyKandevCLI])
+	}
 	if _, leaked := got.Env["UNRELATED"]; leaked {
 		t.Fatalf("Env leaked a non-allowlisted key: %+v", got.Env)
+	}
+}
+
+func TestBuildSSHCreateInstanceRequestStripsForkPRCredentials(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		Metadata:   map[string]interface{}{metadataCheckoutRef: "refs/pull/3527/head"},
+		Env: map[string]string{
+			"GITHUB_TOKEN":   "secret",
+			"GH_TOKEN":       "secret-2",
+			"OPENAI_API_KEY": "keep",
+		},
+	}
+
+	got := buildSSHCreateInstanceRequest(req, "/workspace", "/agentctl")
+	if _, ok := got.Env["GITHUB_TOKEN"]; ok {
+		t.Fatalf("fork PR agent env leaked GITHUB_TOKEN: %v", got.Env)
+	}
+	if _, ok := got.Env["GH_TOKEN"]; ok {
+		t.Fatalf("fork PR agent env leaked GH_TOKEN: %v", got.Env)
+	}
+	if got.Env["OPENAI_API_KEY"] != "keep" {
+		t.Fatalf("non-GitHub env was dropped: %v", got.Env)
+	}
+}
+
+func TestBuildSSHCreateInstanceRequestPreservesSelectedClaudeConfigDir(t *testing.T) {
+	configDir := "/home/agent/.kandev/sessions/instance-1/.claude"
+	req := &ExecutorCreateRequest{
+		InstanceID:  "instance-1",
+		AgentConfig: agents.NewClaudeACP(),
+		Env:         map[string]string{"CLAUDE_CONFIG_DIR": configDir},
+	}
+	got := buildSSHCreateInstanceRequest(req, "/workspace", "/agentctl")
+	if got.Env["CLAUDE_CONFIG_DIR"] != configDir {
+		t.Fatalf("selected agent config dir = %q, want unchanged %q", got.Env["CLAUDE_CONFIG_DIR"], configDir)
 	}
 }
 
@@ -297,6 +340,23 @@ func TestSSHRemoteAgentEnvForwardsOnlyScopedCredentials(t *testing.T) {
 		}
 		if _, ok := env["PROFILE_ONLY"]; ok {
 			t.Fatal("unapproved profile key must not be forwarded to the remote agent")
+		}
+	})
+
+	t.Run("signed runtime contract is forwarded", func(t *testing.T) {
+		env := sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{
+			envKeyKandevAPIURL:      "http://127.0.0.1:38429/api/v1",
+			envKeyKandevAPIKey:      "signed-key",
+			envKeyKandevRunToken:    "signed-token",
+			envKeyKandevAgentID:     "agent-1",
+			envKeyKandevWorkspaceID: "workspace-1",
+			envKeyKandevRunID:       "run-1",
+			envKeyKandevTaskID:      "task-1",
+			envKeyKandevCLI:         "/host/agentctl",
+		}})
+		if env[envKeyKandevAPIURL] == "" || env[envKeyKandevAPIKey] != "signed-key" ||
+			env[envKeyKandevRunToken] != "signed-token" || env[envKeyKandevTaskID] != "task-1" {
+			t.Fatalf("runtime contract = %+v", env)
 		}
 	})
 

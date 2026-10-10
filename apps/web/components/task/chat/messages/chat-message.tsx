@@ -5,10 +5,12 @@ import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-r
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
+import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
-import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
+import { SenderTaskBadge } from "./sender-task-badge";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   WorkflowStepMessageBadge,
@@ -25,6 +27,7 @@ import { entityReferencesFromMetadata } from "@/lib/entity-references/message-re
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
+import { useMessageTaskOrigin } from "./message-task-origin-context";
 
 type ChatMessageProps = {
   comment: Message;
@@ -93,7 +96,7 @@ type UserMessageProps = {
 };
 
 type UserMessageMetadata = WorkflowMessageMetadata & {
-  attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
+  attachments?: UserMessageAttachment[];
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
@@ -138,12 +141,14 @@ function parseUserMessageMetadata(comment: Message) {
 }
 
 function UserContextBadges({
+  destinationTaskId,
   hasPlanMode,
   hasReviewComments,
   contextFiles,
   senderTask,
   workflowMessage,
 }: {
+  destinationTaskId: string;
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
@@ -162,7 +167,7 @@ function UserContextBadges({
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
       {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} />}
-      {senderTask && <SenderTaskBadge sender={senderTask} />}
+      {senderTask && <SenderTaskBadge sender={senderTask} destinationTaskId={destinationTaskId} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
           <IconWand size={10} /> {t("task:planMode")}
@@ -269,6 +274,7 @@ function UserMessageContent({
   onScrollToMessage,
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
+  const taskOrigin = useMessageTaskOrigin();
   const promptNames = usePromptMentionNames();
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
   const entityReferences = useMemo(
@@ -293,6 +299,7 @@ function UserMessageContent({
     <div className="flex justify-end w-full overflow-hidden">
       <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden group">
         <UserContextBadges
+          destinationTaskId={comment.task_id}
           hasPlanMode={hasPlanMode}
           hasReviewComments={hasReviewComments}
           contextFiles={contextFiles}
@@ -323,6 +330,7 @@ function UserMessageContent({
             taskId: comment.task_id,
             worktreePath,
             onOpenFile,
+            taskOrigin,
           })}
         </div>
         <MessageActions
@@ -335,7 +343,9 @@ function UserMessageContent({
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
           isFavorite={isFavorite}
-          onToggleFavorite={toggleFavorite}
+          onToggleFavorite={
+            comment.id === TASK_DESCRIPTION_SYNTHETIC_ID ? undefined : toggleFavorite
+          }
           onNavigatePrev={() => {
             if (userNavigation.previousId && onScrollToMessage)
               onScrollToMessage(userNavigation.previousId);

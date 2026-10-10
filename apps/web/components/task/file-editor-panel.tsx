@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileEditorContent, type FileEditorContentProps } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
@@ -39,11 +39,13 @@ function ImagePanel({
   worktreePath: string | undefined;
   headerActions?: React.ReactNode;
 }) {
+  const isSymlink = useDockviewStore((s) => !!s.openFiles.get(fileKey)?.resolvedPath);
   const content = useDockviewStore((s) => s.openFiles.get(fileKey)?.content ?? "");
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
         <FileImageViewer
+          isSymlink={isSymlink}
           path={path}
           content={content}
           worktreePath={worktreePath}
@@ -157,6 +159,7 @@ function StaticFilePanel({
   repositoryId,
   repositoryName,
 }: StaticFilePanelProps) {
+  const isSymlink = useDockviewStore((s) => !!s.openFiles.get(fileKey)?.resolvedPath);
   const onDownload = useOpenFileDownload(fileKey, path);
   const headerActions = (
     <>
@@ -183,7 +186,12 @@ function StaticFilePanel({
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
-        <FileBinaryViewer path={path} worktreePath={worktreePath} headerActions={headerActions} />
+        <FileBinaryViewer
+          isSymlink={isSymlink}
+          path={path}
+          worktreePath={worktreePath}
+          headerActions={headerActions}
+        />
       </PanelBody>
     </PanelRoot>
   );
@@ -235,6 +243,7 @@ function useFileLoader({
           originalHash: hash,
           isDirty: false,
           isBinary: response.is_binary,
+          resolvedPath: response.resolved_path,
         };
         setFileState(fileKey, state);
       })
@@ -286,8 +295,17 @@ function useResyncOnTabActivate({
   repo,
   updateFileState,
 }: ResyncOnTabActivateArgs) {
+  const visitRef = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    visitRef.current = Symbol();
+    return () => {
+      visitRef.current = null;
+    };
+  }, [panelId, hasFile, activeSessionId, fileKey, path, repo]);
   useEffect(() => {
     if (!hasFile || !activeSessionId) return;
+    const visit = visitRef.current;
+    if (!visit) return;
     // panelPortalManager.acquire() runs in usePortalSlot's mount effect (the
     // dockview-side slot), which fires before child portals' effects, so the
     // entry is virtually always present here. There is one acceptable miss:
@@ -298,6 +316,7 @@ function useResyncOnTabActivate({
     // accept that edge case rather than wiring a manager-level subscription.
     const entry = panelPortalManager.get(panelId);
     if (!entry?.api) return;
+    const panelApi = entry.api;
     const syncNow = () => {
       const client = getWebSocketClient();
       if (!client) return;
@@ -308,14 +327,16 @@ function useResyncOnTabActivate({
         path,
         repo,
         updateFileState,
+        isCurrent: () =>
+          visitRef.current === visit && panelPortalManager.get(panelId)?.api === panelApi,
       });
     };
     // If the panel is already the active tab when this effect first runs,
     // onDidActiveChange won't fire (no transition), but the user is already
     // looking at the editor — sync immediately so the initial open path
     // benefits from the same WS-event-miss recovery as later activations.
-    if (entry.api.isActive) syncNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
+    if (panelApi.isActive) syncNow();
+    const disposable = panelApi.onDidActiveChange((event) => {
       if (event.isActive) syncNow();
     });
     return () => disposable.dispose();
@@ -329,6 +350,7 @@ type FileEditorPanelProps = {
 
 function useFileEditorBuffer(fileKey: string) {
   const hasFile = useDockviewStore((s) => s.openFiles.has(fileKey));
+  const isSymlink = useDockviewStore((s) => !!s.openFiles.get(fileKey)?.resolvedPath);
   const content = useDockviewStore((s) => s.openFiles.get(fileKey)?.content ?? "");
   const isDirty = useDockviewStore((s) => s.openFiles.get(fileKey)?.isDirty ?? false);
   const hasRemoteUpdate = useDockviewStore(
@@ -342,6 +364,7 @@ function useFileEditorBuffer(fileKey: string) {
   );
   return {
     hasFile,
+    isSymlink,
     content,
     isDirty,
     hasRemoteUpdate,
@@ -454,7 +477,7 @@ type LoadedFileEditorPanelProps = {
   >;
   buffer: Pick<
     FileEditorContentProps,
-    "path" | "content" | "originalContent" | "isDirty" | "hasRemoteUpdate" | "vcsDiff"
+    "isSymlink" | "path" | "content" | "originalContent" | "isDirty" | "hasRemoteUpdate" | "vcsDiff"
   >;
   options: Pick<
     FileEditorContentProps,
@@ -561,6 +584,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
       fileKey={fileKey}
       panelProps={panelProps}
       buffer={{
+        isSymlink: file.isSymlink,
         path,
         content: file.content,
         originalContent: file.originalContent,
