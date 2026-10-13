@@ -62,9 +62,9 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 }
 
 // persistInitialHarnessGeneration records the first native conversation for a
-// session incarnation. Explicit context continuation owns its generation CAS;
-// this handler only fills the absent initial row and never overwrites a newer
-// generation observed from a replacement execution.
+// session incarnation, or the successor created by an explicit fresh start.
+// Explicit context continuation owns its generation CAS; this handler never
+// overwrites a newer generation observed from a replacement execution.
 func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watcher.ACPSessionEventData) {
 	if data.DeliveryHarnessGeneration == 0 || s.repo == nil {
 		return
@@ -89,6 +89,9 @@ func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watc
 		incarnationID = session.ID
 	}
 	if current, currentErr := store.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID); currentErr == nil && current != nil {
+		if data.DeliveryReplacesNativeConversation && uint64(current.Generation)+1 == data.DeliveryHarnessGeneration {
+			s.commitReplacementHarnessGeneration(ctx, store, session, current, data)
+		}
 		return
 	} else if currentErr != nil && !errors.Is(currentErr, models.ErrTaskSessionNotFound) {
 		s.logger.Warn("failed to inspect current harness generation",
@@ -112,6 +115,38 @@ func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watc
 		s.logger.Warn("failed to persist initial harness generation",
 			zap.String("session_id", data.SessionID),
 			zap.Int64("generation", int64(data.DeliveryHarnessGeneration)),
+			zap.Error(err))
+	}
+}
+
+// commitReplacementHarnessGeneration records a fresh-start native conversation
+// as the direct successor of the committed generation. The compare-and-set
+// keeps a concurrent replacement or continuation authoritative.
+func (s *Service) commitReplacementHarnessGeneration(
+	ctx context.Context,
+	store sessionContinuityStore,
+	session *models.TaskSession,
+	current *models.HarnessSessionGeneration,
+	data watcher.ACPSessionEventData,
+) {
+	now := time.Now().UTC()
+	committed, err := store.CommitHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID:             session.ID,
+		IncarnationID:         current.IncarnationID,
+		Generation:            current.Generation + 1,
+		PredecessorGeneration: current.Generation,
+		NativeSessionID:       data.ACPSessionID,
+		AgentType:             session.AgentProfileID,
+		OriginalWorkspace:     session.WorkspacePath,
+		CurrentWorkspace:      session.WorkspacePath,
+		CreationReason:        "native_replaced",
+		CreatedAt:             now,
+		CommittedAt:           now,
+	}, current.Generation)
+	if err != nil || !committed {
+		s.logger.Warn("failed to persist replacement harness generation",
+			zap.String("session_id", data.SessionID),
+			zap.Int64("generation", current.Generation+1),
 			zap.Error(err))
 	}
 }
