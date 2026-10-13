@@ -104,7 +104,6 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		UnreadDivider:                     req.UnreadDivider,
 		AgentGeneratedTaskTitles:          req.AgentGeneratedTaskTitles,
 		PromptSuggestions:                 req.PromptSuggestions,
-		PromptSuggestionsFallback:         req.PromptSuggestionsFallback,
 		AutoFocusNewTasks:                 req.AutoFocusNewTasks,
 		MCPTaskAgentProfileDefault:        req.MCPTaskAgentProfileDefault,
 		ShowAnchoredPromptBar:             req.ShowAnchoredPromptBar,

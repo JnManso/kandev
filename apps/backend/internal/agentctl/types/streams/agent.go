@@ -470,8 +470,7 @@ type AgentEvent struct {
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
 
 	// SupportsPromptSuggestions indicates this session asked a Claude Code agent
-	// for native next-prompt suggestions, so the composer must not run its
-	// utility fallback for it.
+	// for native next-prompt suggestions. Only such sessions show suggestions.
 	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
 
 	// AuthMethods lists authentication methods from ACP initialize.

@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-UI-PROMPT-SUGGEST-002.2
   - AC-UI-PROMPT-SUGGEST-002.3
   - AC-UI-PROMPT-SUGGEST-002.4
+  - AC-UI-PROMPT-SUGGEST-002.5
 system_design:
   - ../../specs/ui/system-design/composer-prompt-suggestions.md
 ---
@@ -73,7 +74,7 @@ reach Kandev.
 
 ## Out of scope
 
-- Frontend rendering, keys, and the fallback (Task 03).
+- Frontend rendering and keys (Task 03).
 - `set_prompt_suggestions_paused`, back-off, and non-Claude native sources.
 
 ## Acceptance

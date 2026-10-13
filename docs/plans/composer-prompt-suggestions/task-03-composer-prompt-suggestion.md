@@ -16,13 +16,9 @@ acceptance_criteria:
   - AC-UI-PROMPT-SUGGEST-001.2
   - AC-UI-PROMPT-SUGGEST-001.4
   - AC-UI-PROMPT-SUGGEST-002.2
-  - AC-UI-PROMPT-SUGGEST-002.5
+  - AC-UI-PROMPT-SUGGEST-002.3
   - AC-UI-PROMPT-SUGGEST-003.1
-  - AC-UI-PROMPT-SUGGEST-003.2
   - AC-UI-PROMPT-SUGGEST-003.3
-  - AC-UI-PROMPT-SUGGEST-003.4
-  - AC-UI-PROMPT-SUGGEST-003.6
-  - AC-UI-PROMPT-SUGGEST-003.7
   - AC-UI-PROMPT-SUGGEST-004.1
   - AC-UI-PROMPT-SUGGEST-004.2
   - AC-UI-PROMPT-SUGGEST-004.3
@@ -41,8 +37,7 @@ system_design:
 ## Summary
 
 Consume native suggestions from `session.prompt_suggestion` and session
-metadata. Run the utility fallback for non-native sessions. Render the selected
-suggestion as ghost text in the shared composer:
+metadata. Render the selected suggestion as ghost text in the shared composer:
 
 - **Tab** fills the draft.
 - **The submit shortcut** sends the suggestion.
@@ -51,28 +46,22 @@ suggestion as ghost text in the shared composer:
 
 Prove the behavior in task chat, Quick Chat, and on a phone.
 
+This work order first also ran a utility-agent fallback for non-native
+sessions. [Task 04](task-04-native-only-scope.md) removed it and narrowed the
+helpers and the hook to native suggestions.
+
 ## In scope
 
-- **Store.** A `promptSuggestions` slice. The `session.prompt_suggestion`
-  WebSocket handler writes it, and session hydration seeds it from
-  `metadata.prompt_suggestion`.
+- **Session metadata.** The `session.prompt_suggestion` WebSocket handler
+  writes `metadata.prompt_suggestion`, and session hydration restores it.
 - **`lib/prompt-suggestion.ts`.** Helpers:
+  - `readNativePromptSuggestion`
   - `resolveSuggestionTurnKey`
   - `isNativeSuggestionSession`
-  - `shouldRequestFallback`
-  - `buildSuggestionTranscript`: the latest exchange, with the user part capped
-    at 1,500 characters and the whole at 6,000, keeping the agent tail
-  - `normalizeFallbackSuggestion`: tag and label stripping plus the filter
-    table from the system design
-  - bounded `kandev.promptSuggestion.v1` storage for fallback results and
-    dismissals
-- **`hooks/use-prompt-suggestion.ts`.**
-  - Selects the visible suggestion.
-  - Starts the fallback immediately for eligible non-native sessions, only when
-    `promptSuggestionsFallback` is also on and the built-in resolves to a
-    profile, with a
-    15-second `AbortSignal` held in a named constant that E2E can shorten.
-  - Returns `{ suggestion, accept, send, dismiss }`.
+  - `selectVisibleSuggestion`
+  - bounded dismissal storage
+- **`hooks/use-prompt-suggestion.ts`.** Selects the visible suggestion from the
+  store and returns `{ suggestion, dismiss }`.
 - **Editor.**
   - `DynamicPlaceholder` gains `suggestion` storage and the
     `has-prompt-suggestion` class.
@@ -102,20 +91,14 @@ Prove the behavior in task chat, Quick Chat, and on a phone.
 ## Acceptance
 
 - **Native E2E (mock agent, preference on).**
-  1. After a turn, the ghost text and chip appear with no utility request.
+  1. After a turn, the ghost text and chip appear.
   2. Tab fills the draft without sending.
   3. With the draft cleared, Enter sends the suggestion as the user message.
   4. After the next turn, Escape dismisses the suggestion.
   5. A reload restores the latest suggestion.
-- **Fallback E2E (non-native session, main and fallback switches on, stubbed
-  execute).**
-  1. One request is made with the latest-exchange payload.
-  2. The ghost text appears, and a reload makes no second request.
-  3. A response delayed past the budget shows nothing.
-  4. Filtered responses show nothing.
 - **When ghost text must not render.** It never renders when:
   - the preference is off;
-  - the session is non-native and the fallback switch is off;
+  - the session is not native;
   - the session is busy, starting, needs recovery, has a clarification pending,
     or has a queued prompt;
   - the draft is non-empty.
@@ -155,7 +138,6 @@ cd apps && pnpm --filter @kandev/web lint
 
 - `apps/web/lib/prompt-suggestion.ts` and `.test.ts`
 - `apps/web/hooks/use-prompt-suggestion.ts` and `.test.ts`
-- `apps/web/lib/state/slices/session/` (prompt suggestion slice and types)
 - `apps/web/lib/ws/handlers/prompt-suggestions.ts` and `.test.ts`, plus handler
   registration
 - `apps/web/components/task/chat/tiptap-dynamic-placeholder.ts` and `.test.ts`
@@ -172,7 +154,7 @@ cd apps && pnpm --filter @kandev/web lint
 
 ## Dependencies
 
-- Task 01: the preference and the fallback built-in.
+- Task 01: the preference.
 - Task 02: native events, metadata, and mock agent support.
 
 ## Risks
@@ -199,8 +181,6 @@ cd apps && pnpm --filter @kandev/web lint
 - `docs/specs/ui/system-design/composer-prompt-suggestions.md`
 - `docs/plans/composer-prompt-suggestions/plan.md` (UI previews, E2E plan)
 - `apps/web/AGENTS.md`, `docs/i18n.md`, `/mobile-parity`, `/e2e`
-- `apps/web/hooks/use-summarize-session.ts` (sessionless utility call)
-- `apps/web/e2e/tests/task/enhance-prompt.spec.ts` (utility route stub)
 - `apps/web/components/task/chat/chat-input-focus-hint.tsx` (hint slot)
 
 ## Results
@@ -210,7 +190,6 @@ Implemented.
 - **Native suggestions.** They live in the session's `metadata.prompt_suggestion`,
   written by `session.prompt_suggestion` and restored by hydration. There is no
   separate store slice.
-- **Fallback.** Results and dismissals live in `kandev.promptSuggestion.v1`.
 - **Ghost text.** It renders from its own `data-prompt-suggestion` attribute, so
   `data-placeholder` keeps the normal placeholder. Existing E2E idle detection
   depends on that.
@@ -222,7 +201,7 @@ Implemented.
   phone confirmed that the chip no longer covers the toolbar or the send
   button.
 - **Mock agent scope.** It advertises native suggestions only as `mock-agent`
-  and `claude-acp`. Stand-ins for other providers keep the fallback path.
+  and `claude-acp`. Stand-ins for other providers show no suggestion.
 
 Fixes found by E2E:
 
@@ -246,8 +225,9 @@ Verification:
 - Unit tests for chat, settings, ws, settings slices, ssr, quick-chat, and
   hooks/lib suggestions: 500 files and 4,248 tests, run before the final
   additions. All pass after the composer-test mocks were added.
-- `pnpm e2e:run tests/chat/prompt-suggestions.spec.ts`: 4 passed. Covers native,
-  fallback, preference off, and Quick Chat Escape.
+- `pnpm e2e:run tests/chat/prompt-suggestions.spec.ts`: 4 passed, at the time
+  covering native, fallback, preference off, and Quick Chat Escape. Task 04
+  replaced the fallback case.
 - `pnpm e2e:run --project mobile-chrome tests/chat/mobile-prompt-suggestions.spec.ts`:
   1 passed.
 - `pnpm e2e:run tests/settings/prompt-suggestion-settings.spec.ts`: 1 passed.

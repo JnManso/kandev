@@ -152,7 +152,6 @@ The built-in actions are:
 - `pr-description`
 - `enhance-prompt`
 - `summarize-session`
-- `suggest-next-prompt`
 
 Set a global **Default utility agent profile** by choosing an enabled, global, ACP inference profile. Each built-in action can inherit that profile or select another profile, and its prompt template is editable. The profile owns the agent, model, mode, launch flags, environment, and permission policy.
 
@@ -166,9 +165,9 @@ Utility calls run as ephemeral processes on the Kandev backend host. Kandev reso
 
 Turn on **Suggest next prompt** in **Settings > Task behavior > Conversation** to see the reply you are most likely to send next as dimmed text in the empty chat composer of a task or Quick Chat. Press **Tab** (or tap **Use reply** on a phone) to fill it in for editing, press your submit shortcut to send it as is, or press **Escape** to dismiss it. Typing hides the suggestion; clearing the composer shows it again until the next turn.
 
-Sessions that run Claude Code, whether the Claude agent or a custom ACP agent that wraps Claude Code, use Claude Code's own suggestion. It arrives about two seconds after the turn ends and reuses the conversation's prompt cache. Kandev detects Claude Code from the agent's ACP handshake, so the model does not matter: OpenCode or Codex running an Anthropic model use the fallback below. Turning the setting on or off affects a Claude session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
+Suggestions come only from agents with native support. Today that means sessions that run Claude Code, whether the Claude agent or a custom ACP agent that wraps Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache. Kandev detects Claude Code from the agent's ACP handshake, so the model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a Claude session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
 
-Other agents have no native suggestions. To get suggestions for them too, also turn on **Use a utility agent when the agent has no native suggestions**. The suggestion runs on the profile chosen for the `suggest-next-prompt` utility agent, else on the default utility agent profile, else on the session's own agent profile. Choosing a profile in either place changes the same binding; pick a fast, inexpensive model to keep the extra call cheap. Each completed turn then makes one extra utility call while the session is open in a browser. A suggestion that takes longer than 15 seconds is dropped.
+Kandev never generates a suggestion of its own. For agents without native support, and for turns where Claude Code stays silent, the composer works as usual.
 
 ### Configuration Chat
 

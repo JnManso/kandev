@@ -14,15 +14,15 @@ requirements:
 
 The shared chat composer (`ChatInputArea`) owns how a prompt suggestion is
 selected, rendered, accepted, sent, and dismissed. Task chat and Quick Chat both
-mount it. Suggestions come from two sources:
+mount it. Suggestions have one source, the session's own agent runtime:
 
 - **Native (Claude).** Claude Code generates the suggestion inside the session's
   own agent process. It forks the finished conversation with the prompt cache
   warm and denies all tools. The suggestion reaches the composer through
   agentctl, the orchestrator, session metadata, and a WebSocket event.
-- **Utility fallback.** For sessions without native suggestions, the browser
-  that shows the session runs the `suggest-next-prompt` built-in utility agent.
-  The result is cached in that browser.
+
+There is no generated replacement. A session that did not negotiate native
+suggestions, or a turn that produced none, leaves the composer unchanged.
 
 Adjacent contracts used, with the change each needs:
 
@@ -32,8 +32,6 @@ Adjacent contracts used, with the change each needs:
   the `_claude/sdkMessage` extension notification. Kandev's ACP client must
   receive extension notifications. The `kdlbs/acp-go-sdk` fork currently routes
   them to `MethodNotFound`, and they are dropped.
-- **Utility-agent execution (Agents).** `POST /api/v1/utility/execute`, see
-  [utility agent profiles](../../agents/system-design/utility-agent-profiles.md).
 - **Session and turn lifecycle (Tasks).** This design reads session state,
   turns, messages, the queue, and pending clarification. It writes one session
   metadata key with a state-guarded write.
@@ -45,7 +43,7 @@ Adjacent contracts used, with the change each needs:
 | --- | --- |
 | `REQ-UI-PROMPT-SUGGEST-001` | [Preference](#preference), [Native launch request](#native-launch-request), [Components and responsibilities](#frontend) |
 | `REQ-UI-PROMPT-SUGGEST-002` | [Native launch request](#native-launch-request), [Native delivery](#native-delivery), [Persistence](#persistence) |
-| `REQ-UI-PROMPT-SUGGEST-003` | [Utility fallback](#utility-fallback), [Fallback prompt and filters](#fallback-prompt-and-filters), [Failure and recovery](#failure-and-recovery) |
+| `REQ-UI-PROMPT-SUGGEST-003` | [Composer selection](#composer-selection), [Failure and recovery](#failure-and-recovery) |
 | `REQ-UI-PROMPT-SUGGEST-004` | [Composer selection](#composer-selection), [Rendering and keys](#rendering-and-keys) |
 
 ## Components and responsibilities
@@ -129,12 +127,8 @@ contains this change.
   4. Publishes `session.prompt_suggestion` (`events.SessionPromptSuggestion`)
      with `{task_id, session_id, turn_id, text}` through the existing session
      notification bridge.
-- **Utility built-in.** Adds `apps/backend/config/utilityagents/suggest-next-prompt.md`
-  and a `builtinDefs` entry with ID `builtin-suggest-next-prompt` and name
-  `suggest-next-prompt`. The existing startup seed inserts it.
-- **User settings.** `prompt_suggestions` and `prompt_suggestions_fallback` are
-  booleans, default `false`. They follow the same path as
-  `agent_generated_task_titles`.
+- **User settings.** `prompt_suggestions` is a boolean, default `false`. It
+  follows the same path as `agent_generated_task_titles`.
 - **Mock agent.** When `session/new` or `session/load` carries
   `_meta.claudeCode.options.promptSuggestions = true`, the mock agent sends
   `_claude/sdkMessage` with a deterministic `prompt_suggestion` after each turn
@@ -147,27 +141,22 @@ contains this change.
   session, and the `session.agent_capabilities` handler mirrors
   `metadata.prompt_suggestion_source`. Hydration restores both after a reload.
 - **`lib/prompt-suggestion.ts`.** Pure helpers:
+  - `readNativePromptSuggestion`, which validates `metadata.prompt_suggestion`
   - `resolveSuggestionTurnKey`
   - `isNativeSuggestionSession`, which reads
     `metadata.prompt_suggestion_source === "native"`
-  - `shouldRequestFallback`
-  - `buildSuggestionTranscript`
-  - `normalizeFallbackSuggestion`, the filters below
-  - bounded fallback cache storage
-- **`hooks/use-prompt-suggestion.ts`.** Selects the visible suggestion and runs
-  the fallback when eligible. Returns `{ suggestion, accept, send, dismiss }`.
+  - `selectVisibleSuggestion`, the composer selection below
+  - bounded dismissal storage
+- **`hooks/use-prompt-suggestion.ts`.** Reads the store and returns the visible
+  suggestion and a `dismiss` callback. It never issues a request.
 - **Editor and composer.** The editor and composer:
   - extend `DynamicPlaceholder` storage with `suggestion` and the
     `has-prompt-suggestion` class;
   - add a Tab, submit-shortcut, and Escape keymap after the suggestion-menu
     handlers;
   - add `ComposerPromptSuggestionHint` beside `ChatInputFocusHint`;
-  - add `PromptSuggestionSettings` in Settings > Task behavior > Conversation. It
-    holds the main switch; the fallback switch, rendered only when the main
-    switch is on; and, when the fallback switch is on, an agent profile selector
-    bound to the `builtin-suggest-next-prompt` utility agent. The selector
-    reuses `UtilityAgentProfilePicker` and its eligibility rules, and saves
-    through the existing utility agent update API.
+  - add `PromptSuggestionSettings` in Settings > Task behavior > Conversation,
+    with the single "Suggest next prompt" switch.
 
 ## Data and contracts
 
@@ -177,16 +166,6 @@ contains this change.
 | --- | --- | --- | --- |
 | HTTP and boot payload | `prompt_suggestions` | boolean | `false` |
 | Store | `userSettings.promptSuggestions` | boolean | `false` |
-| HTTP and boot payload | `prompt_suggestions_fallback` | boolean | `false` |
-| Store | `userSettings.promptSuggestionsFallback` | boolean | `false` |
-
-The effective fallback is `prompt_suggestions && prompt_suggestions_fallback`.
-
-The fallback profile is not a new setting. It is the existing
-`profile_binding_state` and `agent_profile_id` of the
-`builtin-suggest-next-prompt` utility agent, read and written through the
-existing utility agent API. Settings > Task behavior and Settings > Utility Agents
-edit the same row. `inherit` means the user's default utility agent profile.
 
 ### Native launch request
 
@@ -199,8 +178,8 @@ is shown above. Session metadata key:
 | `prompt_suggestion_source` | `"native"` or `"none"` | orchestrator, from `agent_capabilities` |
 
 A session counts as native only when it negotiated native suggestions. A Claude
-Code session started while the preference was off is not native. It uses the
-fallback, if enabled, until it restarts or resumes.
+Code session started while the preference was off is not native, and shows no
+suggestion until it restarts or resumes with the preference on.
 
 ### Native delivery
 
@@ -209,76 +188,6 @@ WebSocket event `session.prompt_suggestion`:
 ```json
 { "task_id": "...", "session_id": "...", "turn_id": "...", "text": "sim, corre a migration e os testes" }
 ```
-
-### Utility fallback
-
-The request is sessionless, so it runs on the host utility manager and never
-wakes the session executor:
-
-```json
-{
-  "utility_agent_id": "builtin-suggest-next-prompt",
-  "session_id": "",
-  "task_title": "...",
-  "conversation_history": "<latest exchange>",
-  "fallback_agent_profile_id": "<the session's agent_profile_id>"
-}
-```
-
-Profile resolution follows `AC-UI-PROMPT-SUGGEST-003.9`. The utility service
-uses `fallback_agent_profile_id` only when the built-in inherits and no default
-utility profile exists. It validates that profile with the same
-`profileResolver` that checks an explicit binding (enabled, global,
-inference-capable, not passthrough), so an ineligible session profile fails
-closed. Only the suggestion hook sends the field, so every other utility action
-keeps its existing fail-closed resolution.
-
-`shouldRequestFallback` is true only when every condition holds:
-
-- the main and fallback preferences are on;
-- the session is not native;
-- the state is `WAITING_FOR_INPUT`, without `needsRecovery`;
-- no turn is active;
-- no clarification or permission is pending;
-- the queue is empty;
-- the newest conversation entry is agent-authored;
-- the turn key has no cache entry and no in-flight request.
-
-The turn key is the latest completed turn ID, or the newest agent message ID
-when no turn record exists.
-
-`buildSuggestionTranscript` keeps the newest user entry and the agent entries
-after it, labelled `User:` and `Agent:` (marked `i18n-exempt`). The user part is
-capped at 1,500 characters and the whole transcript at 6,000. The agent tail is
-kept.
-
-### Fallback prompt and filters
-
-The template is an original Kandev prompt that encodes the rules in
-`AC-UI-PROMPT-SUGGEST-003.5`. It receives `{{TaskTitle}}` and
-`{{ConversationHistory}}`. It asks for the suggestion alone, without quotes or
-explanation, and asks for an empty reply when the model should stay silent.
-
-`normalizeFallbackSuggestion`:
-
-1. Trims the response.
-2. Unwraps one `<suggestion|response|output|answer|result>` tag pair.
-3. Strips a leading `suggestion:`, `reply:`, `response:`, or `answer:` label.
-4. Trims again.
-5. Returns `null` when any rule matches:
-
-| Rule | Condition |
-| --- | --- |
-| empty | Nothing remains |
-| meta | `none`, `done`, `no suggestion…`, `nothing to suggest…`, `silence`, or text fully wrapped in brackets or parentheses |
-| length | More than 12 words, or 100 or more characters |
-| shape | Several sentences (`[.!?]` followed by whitespace and a capital), a newline, or Markdown `*`/`**` |
-| evaluative | `thanks`, `thank you`, `looks good`, `sounds good`, `perfect`, `great`, `nice`, `makes sense` |
-| agent voice | Starts with `let me`, `i'll`, `i've`, `i'm`, `here's`, `sure,`, `of course`, or `certainly` |
-
-The rule strings are protocol patterns, not user copy, and are marked
-`i18n-exempt`. They follow the Claude Code client filters, limited to English
-and language-neutral rules.
 
 ## Control flow
 
@@ -299,28 +208,26 @@ and language-neutral rules.
 6. The frontend stores `{ turnId, text, source: "native" }`. The composer shows
    it when the turn key matches and the draft is empty.
 
-### Utility fallback
-
-1. The composer observes `WAITING_FOR_INPUT` for a non-native session. Because
-   `shouldRequestFallback` is true, the hook starts the request in the same
-   effect pass, with a 15-second `AbortSignal` (`options.init.signal`).
-2. The hook drops the response if the turn key changed. It normalizes the
-   response, then writes the cache and the store entry. A server failure
-   (`ApiError` or `success: false`) or the timeout caches `null`. A transport
-   rejection (page unload, network loss) caches nothing and releases the
-   in-flight key, so the next mount may request again.
-
 ### Composer selection
 
-The visible suggestion is the store entry for the session, shown only when:
+`selectVisibleSuggestion` returns the native suggestion text only when every
+condition holds, and `null` otherwise:
 
-- its turn key equals the current turn key;
-- it is not dismissed;
+- the preference is on;
+- the session is native (`prompt_suggestion_source === "native"`);
+- `metadata.prompt_suggestion` holds a non-empty text and turn ID;
 - the session is `WAITING_FOR_INPUT` with no active turn, recovery,
-  clarification, or queue;
-- the preference is on.
+  clarification, queued prompt, or task move;
+- the suggestion's turn ID equals the current turn key. When the browser has
+  not loaded turn records yet, the backend's state-guarded binding is
+  authoritative;
+- the suggestion is not dismissed for its turn.
 
-Dismissals are kept in the browser cache by session and turn key.
+The turn key is the latest completed turn ID, or the newest agent message ID
+when no turn record exists. A newer turn changes the key, so an older
+suggestion is stale and stays hidden even though the metadata still holds it.
+
+Dismissals are kept in the browser by session and turn ID.
 
 ## Rendering and keys
 
@@ -344,18 +251,19 @@ Dismissals are kept in the browser cache by session and turn key.
 
 ## Failure and recovery
 
-- **Adapter without support.** Native suggestions never arrive, and the session
-  simply shows none, because native mode suppresses the fallback. This applies
-  to a missing `_meta` handling or an older pinned version. The adapter version
-  is pinned (0.81.2 verified), so this is a regression signal.
+- **Agent without native support.** agentctl sends no `_meta`, the session
+  records no native source, and the composer keeps its normal behavior.
+- **Adapter that accepts the `_meta` but sends nothing.** The session is native,
+  but no suggestion arrives, so the composer shows none. This applies to a
+  missing `_meta` handling or an older pinned version. The adapter version is
+  pinned (0.81.2 verified), so this is a regression signal.
+- **Suggestion payload on a non-native session.** The composer ignores it.
 - **Notification ordering.** A suggestion arriving after a newer prompt is
   dropped by agentctl (step 4). A suggestion that loses the race to a state
   change is dropped by the state-guarded write (step 5).
 - **Backend restart.** The metadata survives. The frontend still shows the
   suggestion only while its turn is the latest.
-- **Fallback failure, timeout, or no utility agent.** No toast, and `null` is
-  cached for the turn. A transport rejection is not cached.
-- **Storage errors.** These are treated as an empty cache.
+- **Storage errors.** These are treated as no dismissal.
 
 ## Latency
 
@@ -370,23 +278,20 @@ often show no native suggestion, by design.
   probe through `claude-agent-acp@0.81.2` with the Kandev `_meta` measured 1.66
   and 1.89 seconds. It uses no extra
   agent process, and its token cost is a cache read plus a short suffix.
-- **Fallback.** About 3 to 8 seconds, measured with ACP probe logs and one-shot
-  CLI calls. It is capped at 15 seconds.
 
 ## Persistence
 
 - **Native suggestion.** Persisted in session metadata and overwritten each
   turn. No schema change.
-- **Fallback results and dismissals.** Stored in `localStorage` under
-  `kandev.promptSuggestion.v1`, newest first, one entry per session, at most 50
-  entries.
+- **Dismissals.** Stored in `localStorage` under
+  `kandev.promptSuggestionDismissals.v1` as `{ sessionId, turnKey }`, newest
+  first, one entry per session, at most 50 entries.
 - **Preference.** Stored in the user settings JSON document. No migration.
 
 ## Security
 
 - **Native.** The suggestion is produced inside the user's own agent session,
   with all tools denied by Claude Code.
-- **Fallback.** The transcript goes to the user's configured utility profile.
 - **Rendering.** Suggestions render as plain text through CSS `attr()` and
   `aria-label`, never as HTML.
 - **Sending.** Sending requires an explicit key or tap. The text passes through
@@ -396,11 +301,10 @@ often show no native suggestion, by design.
 
 - **agentctl.** Debug log for a dropped stale suggestion.
 - **Orchestrator.** Debug log for a rejected or state-lost write.
-- **Fallback calls.** Recorded in `utility_agent_calls`.
 - **Metrics.** None in this version.
 
 ## Related decisions
 
-No ADR. The change reuses ACP `_meta` and extension notifications, existing
-session metadata, and utility-agent execution. The SDK fork change makes its
+No ADR. The change reuses ACP `_meta` and extension notifications and existing
+session metadata. The SDK fork change makes its
 documented extension contract complete for notifications.

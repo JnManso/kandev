@@ -34,7 +34,7 @@ export function registerAgentCapabilitiesHandlers(store: StoreApi<AppState>): Ws
 }
 
 /** Mirrors the backend's prompt_suggestion_source metadata so the composer
- *  stops (or starts) using the utility fallback without a reload. */
+ *  shows or hides native suggestions without a reload. */
 function syncPromptSuggestionSource(store: StoreApi<AppState>, payload: AgentCapabilitiesPayload) {
   const session = store.getState().taskSessions.items[payload.session_id];
   if (!session) return;
