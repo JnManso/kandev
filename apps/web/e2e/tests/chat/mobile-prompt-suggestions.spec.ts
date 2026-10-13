@@ -19,7 +19,7 @@ test("phone: the Use reply button is a 44px touch target that fills the draft", 
   apiClient,
 }) => {
   test.setTimeout(120_000);
-  await setPromptSuggestions(apiClient, true, false);
+  await setPromptSuggestions(apiClient, true);
   try {
     const dialog = await openMobileQuickChat(testPage);
     await startQuickChatFromSetup(dialog, testPage);
@@ -36,6 +36,6 @@ test("phone: the Use reply button is a 44px touch target that fills the draft", 
     await expect(ghost).toHaveCount(0);
     await expect(accept).toHaveCount(0);
   } finally {
-    await setPromptSuggestions(apiClient, false, false);
+    await setPromptSuggestions(apiClient, false);
   }
 });

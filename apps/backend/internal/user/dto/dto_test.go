@@ -716,29 +716,26 @@ func TestNullableRawMessage(t *testing.T) {
 	})
 }
 
-// TestPromptSuggestionsDTOAndPatchSemantics verifies both prompt suggestion flags map to the DTO and patch only when present.
+// TestPromptSuggestionsDTOAndPatchSemantics verifies the prompt suggestion flag maps to the DTO and patches only when present.
 func TestPromptSuggestionsDTOAndPatchSemantics(t *testing.T) {
-	got := FromUserSettings(&models.UserSettings{PromptSuggestions: true, PromptSuggestionsFallback: true})
-	if !got.PromptSuggestions || !got.PromptSuggestionsFallback {
-		t.Fatalf("DTO flags = (%v, %v), want both true", got.PromptSuggestions, got.PromptSuggestionsFallback)
+	got := FromUserSettings(&models.UserSettings{PromptSuggestions: true})
+	if !got.PromptSuggestions {
+		t.Fatal("DTO PromptSuggestions = false, want true")
 	}
 
 	var omitted UpdateUserSettingsRequest
 	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
 		t.Fatalf("decode omitted request: %v", err)
 	}
-	if omitted.PromptSuggestions != nil || omitted.PromptSuggestionsFallback != nil {
-		t.Fatalf("omitted flags = (%#v, %#v), want nil", omitted.PromptSuggestions, omitted.PromptSuggestionsFallback)
+	if omitted.PromptSuggestions != nil {
+		t.Fatalf("omitted PromptSuggestions = %#v, want nil", omitted.PromptSuggestions)
 	}
 
 	var explicit UpdateUserSettingsRequest
-	if err := json.Unmarshal([]byte(`{"prompt_suggestions":true,"prompt_suggestions_fallback":false}`), &explicit); err != nil {
+	if err := json.Unmarshal([]byte(`{"prompt_suggestions":true}`), &explicit); err != nil {
 		t.Fatalf("decode explicit request: %v", err)
 	}
 	if explicit.PromptSuggestions == nil || !*explicit.PromptSuggestions {
 		t.Fatalf("PromptSuggestions = %#v, want true", explicit.PromptSuggestions)
-	}
-	if explicit.PromptSuggestionsFallback == nil || *explicit.PromptSuggestionsFallback {
-		t.Fatalf("PromptSuggestionsFallback = %#v, want false", explicit.PromptSuggestionsFallback)
 	}
 }

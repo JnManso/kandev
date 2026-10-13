@@ -12,7 +12,6 @@ export function useComposerPromptSuggestion(panelState: ChatPanelState, isMoving
   );
   const { suggestion, dismiss } = usePromptSuggestion({
     sessionId: panelState.resolvedSessionId,
-    taskTitle: panelState.task?.title ?? "",
     blocked: panelState.isAgentBusy || panelState.needsRecovery || clarificationPending || isMoving,
   });
   return { promptSuggestion: suggestion, onPromptSuggestionDismiss: dismiss };

@@ -1,25 +1,32 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Message, TaskSession, Turn } from "@/lib/types/http";
 import {
-  buildSuggestionTranscript,
   isNativeSuggestionSession,
-  normalizeFallbackSuggestion,
   readNativePromptSuggestion,
-  readSuggestionCache,
+  readSuggestionDismissal,
   resolveSuggestionTurnKey,
-  shouldRequestFallback,
-  writeSuggestionCache,
-  type FallbackEligibility,
+  selectVisibleSuggestion,
+  writeSuggestionDismissal,
+  type SuggestionSelectionInput,
 } from "./prompt-suggestion";
 
 const T0 = "2026-10-06T00:00:00Z";
 const T1 = "2026-10-06T00:01:00Z";
+const WAITING = "WAITING_FOR_INPUT";
+const SUGGESTION = "sim, corre";
 
-function message(id: string, author: "user" | "agent", content: string, type = "message"): Message {
+function message(
+  id: string,
+  author: "user" | "agent",
+  content: string,
+  turnId?: string,
+  type = "message",
+): Message {
   return {
     id,
     session_id: "s1",
     task_id: "t1",
+    turn_id: turnId,
     author_type: author,
     content,
     type,
@@ -39,7 +46,29 @@ function turn(id: string, completed: boolean): Turn {
   } as Turn;
 }
 
-// @covers AC-UI-PROMPT-SUGGEST-002.2
+function session(metadata: Record<string, unknown>, state = WAITING): TaskSession {
+  return { id: "s1", state, metadata } as unknown as TaskSession;
+}
+
+const nativeMetadata = {
+  prompt_suggestion_source: "native",
+  prompt_suggestion: { turn_id: "turn-1", text: SUGGESTION },
+};
+
+function selection(overrides: Partial<SuggestionSelectionInput> = {}): SuggestionSelectionInput {
+  return {
+    enabled: true,
+    session: session(nativeMetadata),
+    turnKey: { key: "turn-1", isTurnId: true },
+    activeTurn: false,
+    blocked: false,
+    queued: false,
+    dismissedTurnKey: null,
+    ...overrides,
+  };
+}
+
+// @covers AC-UI-PROMPT-SUGGEST-002.3
 describe("readNativePromptSuggestion", () => {
   it("reads the stored native suggestion", () => {
     expect(
@@ -52,158 +81,158 @@ describe("readNativePromptSuggestion", () => {
     expect(
       readNativePromptSuggestion({ prompt_suggestion: { turn_id: "", text: "x" } }),
     ).toBeNull();
+    expect(
+      readNativePromptSuggestion({ prompt_suggestion: { turn_id: "t", text: "  " } }),
+    ).toBeNull();
     expect(readNativePromptSuggestion({ prompt_suggestion: "x" })).toBeNull();
   });
 });
 
 describe("resolveSuggestionTurnKey", () => {
   it("uses the latest completed turn", () => {
-    expect(resolveSuggestionTurnKey([turn("a", true), turn("b", true)], [])).toBe("b");
+    expect(resolveSuggestionTurnKey([turn("a", true), turn("b", true)], [])).toEqual({
+      key: "b",
+      isTurnId: true,
+    });
   });
 
   it("returns null while the latest turn is still active", () => {
     expect(resolveSuggestionTurnKey([turn("a", true), turn("b", false)], [])).toBeNull();
   });
 
-  it("falls back to the newest agent message without turn records", () => {
+  it("uses the newest agent message's turn without turn records", () => {
+    const messages = [
+      message("m1", "user", "hi", "turn-1"),
+      message("m2", "agent", "hello", "turn-1"),
+    ];
+    expect(resolveSuggestionTurnKey(undefined, messages)).toEqual({
+      key: "turn-1",
+      isTurnId: true,
+    });
+  });
+
+  it("falls back to the newest agent message ID when it has no turn", () => {
     const messages = [message("m1", "user", "hi"), message("m2", "agent", "hello")];
-    expect(resolveSuggestionTurnKey(undefined, messages)).toBe("m2");
-    expect(resolveSuggestionTurnKey([], [message("m1", "user", "hi")])).toBeNull();
+    expect(resolveSuggestionTurnKey(undefined, messages)).toEqual({ key: "m2", isTurnId: false });
+  });
+
+  it("has no turn key when the user spoke last", () => {
+    expect(resolveSuggestionTurnKey([], [message("m1", "user", "hi", "turn-2")])).toBeNull();
   });
 });
 
-// @covers AC-UI-PROMPT-SUGGEST-003.1
-describe("buildSuggestionTranscript", () => {
-  it("keeps only the latest exchange", () => {
-    const transcript = buildSuggestionTranscript([
-      message("m1", "user", "old question"),
-      message("m2", "agent", "old answer"),
-      message("m3", "user", "adiciona a migration"),
-      message("m4", "agent", "tool output", "tool_call"),
-      message("m5", "agent", "Feito. Corro os testes?"),
-    ]);
-    expect(transcript).toBe("User: adiciona a migration\n\nAgent: Feito. Corro os testes?");
-  });
-
-  it("caps the user prompt and keeps the tail of a long agent reply", () => {
-    const transcript = buildSuggestionTranscript([
-      message("m1", "user", "u".repeat(3000)),
-      message("m2", "agent", `${"a".repeat(8000)}QUESTION?`),
-    ]);
-    expect(transcript.length).toBeLessThanOrEqual(6000);
-    expect(transcript.startsWith(`User: ${"u".repeat(1500)}`)).toBe(true);
-    expect(transcript.endsWith("QUESTION?")).toBe(true);
+// @covers AC-UI-PROMPT-SUGGEST-002.2
+describe("isNativeSuggestionSession", () => {
+  it("is native only when the session negotiated native suggestions", () => {
+    expect(isNativeSuggestionSession(session({ prompt_suggestion_source: "native" }))).toBe(true);
+    expect(isNativeSuggestionSession(session({ prompt_suggestion_source: "none" }))).toBe(false);
+    expect(isNativeSuggestionSession(session({}))).toBe(false);
+    expect(isNativeSuggestionSession(null)).toBe(false);
   });
 });
 
-// @covers AC-UI-PROMPT-SUGGEST-003.6
-describe("normalizeFallbackSuggestion", () => {
-  it.each([
-    ["  run the tests  ", "run the tests"],
-    ['"commit this"', "commit this"],
-    ["\u201ccommit this\u201d", "commit this"],
-    ["<suggestion>push it</suggestion>", "push it"],
-    ["Suggestion: sim, corre os testes", "sim, corre os testes"],
-  ])("accepts %j", (raw, want) => {
-    expect(normalizeFallbackSuggestion(raw)).toBe(want);
+// @covers AC-UI-PROMPT-SUGGEST-001.2 AC-UI-PROMPT-SUGGEST-004.7
+describe("selectVisibleSuggestion", () => {
+  it("shows the native suggestion for the current turn", () => {
+    expect(selectVisibleSuggestion(selection())).toEqual({ turnKey: "turn-1", text: SUGGESTION });
   });
 
-  it.each([
-    "",
-    "NONE",
-    "No suggestion.",
-    "(silence)",
-    "one two three four five six seven eight nine ten eleven twelve thirteen",
-    "x".repeat(100),
-    "Run the tests. Then commit.",
-    "first line\nsecond line",
-    "**bold** move",
-    "Looks good",
-    "Thanks!",
-    "Let me check",
-    "I'll do it",
-  ])("rejects %j", (raw) => {
-    expect(normalizeFallbackSuggestion(raw)).toBeNull();
-  });
-});
-
-const eligible: FallbackEligibility = {
-  enabled: true,
-  fallbackEnabled: true,
-  native: false,
-  sessionState: "WAITING_FOR_INPUT",
-  needsRecovery: false,
-  activeTurn: false,
-  pendingClarification: false,
-  queued: false,
-  lastEntryIsAgent: true,
-  turnKey: "turn-1",
-  cached: false,
-  inFlight: false,
-};
-
-// @covers AC-UI-PROMPT-SUGGEST-001.2 AC-UI-PROMPT-SUGGEST-002.5 AC-UI-PROMPT-SUGGEST-003.3
-describe("shouldRequestFallback", () => {
-  it("requests for an eligible non-native session", () => {
-    expect(shouldRequestFallback(eligible)).toBe(true);
+  it.each<[string, Partial<SuggestionSelectionInput>]>([
+    ["the preference is off", { enabled: false }],
+    ["the session is running", { session: session(nativeMetadata, "RUNNING") }],
+    ["a turn is active", { activeTurn: true }],
+    ["the composer is blocked", { blocked: true }],
+    ["a prompt is queued", { queued: true }],
+    ["the suggestion was dismissed for its turn", { dismissedTurnKey: "turn-1" }],
+    [
+      "the session needs recovery",
+      { session: { ...session(nativeMetadata), error_message: "boom" } as TaskSession },
+    ],
+  ])("shows nothing when %s", (_name, override) => {
+    expect(selectVisibleSuggestion(selection(override))).toBeNull();
   });
 
-  it.each<[string, Partial<FallbackEligibility>]>([
-    ["preference off", { enabled: false }],
-    ["fallback off", { fallbackEnabled: false }],
-    ["native session", { native: true }],
-    ["busy", { sessionState: "RUNNING" }],
-    ["starting", { sessionState: "STARTING" }],
-    ["needs recovery", { needsRecovery: true }],
-    ["active turn", { activeTurn: true }],
-    ["clarification pending", { pendingClarification: true }],
-    ["queued prompt", { queued: true }],
-    ["user spoke last", { lastEntryIsAgent: false }],
-    ["no turn key", { turnKey: null }],
-    ["already cached", { cached: true }],
-    ["already in flight", { inFlight: true }],
-  ])("skips when %s", (_name, override) => {
-    expect(shouldRequestFallback({ ...eligible, ...override })).toBe(false);
+  it("keeps showing after a dismissal of an older turn", () => {
+    expect(selectVisibleSuggestion(selection({ dismissedTurnKey: "turn-0" }))?.text).toBe(
+      SUGGESTION,
+    );
+  });
+
+  it("trusts the backend turn binding when the newest agent message has no turn", () => {
+    const metadata = {
+      prompt_suggestion_source: "native",
+      prompt_suggestion: { turn_id: "turn-9", text: SUGGESTION },
+    };
+    const input = selection({
+      session: session(metadata),
+      turnKey: { key: "m2", isTurnId: false },
+    });
+    expect(selectVisibleSuggestion(input)).toEqual({ turnKey: "turn-9", text: SUGGESTION });
   });
 });
 
-// @covers AC-UI-PROMPT-SUGGEST-003.2
-describe("suggestion cache", () => {
+// @covers AC-UI-PROMPT-SUGGEST-003.1 AC-UI-PROMPT-SUGGEST-003.2
+describe("selectVisibleSuggestion without native support", () => {
+  it("never shows a suggestion payload on a session that did not negotiate native support", () => {
+    const metadata = { prompt_suggestion: { turn_id: "turn-1", text: SUGGESTION } };
+    expect(selectVisibleSuggestion(selection({ session: session(metadata) }))).toBeNull();
+    const none = { ...metadata, prompt_suggestion_source: "none" };
+    expect(selectVisibleSuggestion(selection({ session: session(none) }))).toBeNull();
+  });
+
+  it("shows nothing when a native session sent no suggestion for the turn", () => {
+    const metadata = { prompt_suggestion_source: "native" };
+    expect(selectVisibleSuggestion(selection({ session: session(metadata) }))).toBeNull();
+  });
+});
+
+// @covers AC-UI-PROMPT-SUGGEST-003.3
+describe("selectVisibleSuggestion with a stale suggestion", () => {
+  it("hides a suggestion bound to an older turn", () => {
+    expect(
+      selectVisibleSuggestion(selection({ turnKey: { key: "turn-2", isTurnId: true } })),
+    ).toBeNull();
+  });
+
+  it("hides a suggestion from an older turn after a reload without turn records", () => {
+    const messages = [
+      message("m1", "user", "go on", "turn-2"),
+      message("m2", "agent", "done", "turn-2"),
+    ];
+    const turnKey = resolveSuggestionTurnKey(undefined, messages);
+    expect(selectVisibleSuggestion(selection({ turnKey }))).toBeNull();
+  });
+
+  it("hides a suggestion while the next turn has not completed", () => {
+    expect(selectVisibleSuggestion(selection({ turnKey: null }))).toBeNull();
+  });
+});
+
+// @covers AC-UI-PROMPT-SUGGEST-004.6
+describe("suggestion dismissals", () => {
   beforeEach(() => window.localStorage.clear());
 
-  it("stores one entry per session and replaces it on a newer turn", () => {
-    writeSuggestionCache({ sessionId: "s1", turnKey: "a", text: "x", dismissed: false });
-    writeSuggestionCache({ sessionId: "s1", turnKey: "b", text: null, dismissed: false });
-    expect(readSuggestionCache("s1")).toEqual({
-      sessionId: "s1",
-      turnKey: "b",
-      text: null,
-      dismissed: false,
-    });
+  it("stores one dismissal per session and replaces it on a newer turn", () => {
+    writeSuggestionDismissal({ sessionId: "s1", turnKey: "a" });
+    writeSuggestionDismissal({ sessionId: "s1", turnKey: "b" });
+    expect(readSuggestionDismissal("s1")).toEqual({ sessionId: "s1", turnKey: "b" });
   });
 
   it("keeps at most 50 sessions", () => {
     for (let i = 0; i < 55; i += 1) {
-      writeSuggestionCache({ sessionId: `s${i}`, turnKey: "t", text: "x", dismissed: false });
+      writeSuggestionDismissal({ sessionId: `s${i}`, turnKey: "t" });
     }
-    expect(readSuggestionCache("s0")).toBeNull();
-    expect(readSuggestionCache("s54")?.text).toBe("x");
+    expect(readSuggestionDismissal("s0")).toBeNull();
+    expect(readSuggestionDismissal("s54")?.turnKey).toBe("t");
   });
 
   it("ignores malformed storage", () => {
-    window.localStorage.setItem("kandev.promptSuggestion.v1", "{not json");
-    expect(readSuggestionCache("s1")).toBeNull();
-  });
-});
-
-// @covers AC-UI-PROMPT-SUGGEST-002.5
-describe("isNativeSuggestionSession", () => {
-  it("is native only when the session negotiated native suggestions", () => {
-    const native = { metadata: { prompt_suggestion_source: "native" } } as unknown as TaskSession;
-    const none = { metadata: { prompt_suggestion_source: "none" } } as unknown as TaskSession;
-    expect(isNativeSuggestionSession(native)).toBe(true);
-    expect(isNativeSuggestionSession(none)).toBe(false);
-    expect(isNativeSuggestionSession({ metadata: {} } as unknown as TaskSession)).toBe(false);
-    expect(isNativeSuggestionSession(null)).toBe(false);
+    window.localStorage.setItem("kandev.promptSuggestionDismissals.v1", "{not json");
+    expect(readSuggestionDismissal("s1")).toBeNull();
+    window.localStorage.setItem(
+      "kandev.promptSuggestionDismissals.v1",
+      JSON.stringify([{ sessionId: "s1" }]),
+    );
+    expect(readSuggestionDismissal("s1")).toBeNull();
   });
 });

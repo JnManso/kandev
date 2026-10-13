@@ -630,7 +630,6 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
 		"prompt_suggestions":                       settings.PromptSuggestions,
-		"prompt_suggestions_fallback":              settings.PromptSuggestionsFallback,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
@@ -834,7 +833,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		UnreadDivider                     *bool                                   `json:"unread_divider"`
 		AgentGeneratedTaskTitles          *bool                                   `json:"agent_generated_task_titles"`
 		PromptSuggestions                 *bool                                   `json:"prompt_suggestions"`
-		PromptSuggestionsFallback         *bool                                   `json:"prompt_suggestions_fallback"`
 		AutoFocusNewTasks                 *bool                                   `json:"auto_focus_new_tasks"`
 		MCPTaskAgentProfileDefault        string                                  `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar             *bool                                   `json:"show_anchored_prompt_bar"`
@@ -933,9 +931,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.PromptSuggestions != nil {
 		settings.PromptSuggestions = *payload.PromptSuggestions
-	}
-	if payload.PromptSuggestionsFallback != nil {
-		settings.PromptSuggestionsFallback = *payload.PromptSuggestionsFallback
 	}
 	if payload.AutoFocusNewTasks != nil {
 		settings.AutoFocusNewTasks = *payload.AutoFocusNewTasks

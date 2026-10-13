@@ -1,30 +1,21 @@
-import { expect, type Page } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { seedIdleSession } from "../../helpers/session";
-import { dwell, injectLatency } from "../../helpers/causal-waits";
+import { dwell } from "../../helpers/causal-waits";
 import { openQuickChatWithAgent } from "./quick-chat-helpers";
 import { NATIVE_SUGGESTION, setPromptSuggestions } from "./prompt-suggestion-helpers";
 
-const FALLBACK_SUGGESTION = "Commit it now";
-const EXECUTE_URL = "**/api/v1/utility/execute";
+// The mock agent skips the native suggestion for a prompt containing this directive.
+const NO_SUGGESTION_DIRECTIVE = "/no-suggestion";
 
-function countExecuteRequests(page: Page) {
-  const calls: unknown[] = [];
-  page.on("request", (request) => {
-    if (request.url().includes("/api/v1/utility/execute")) calls.push(request.postDataJSON());
-  });
-  return calls;
-}
-
-// @covers AC-UI-PROMPT-SUGGEST-002.1 AC-UI-PROMPT-SUGGEST-002.2 AC-UI-PROMPT-SUGGEST-002.5 AC-UI-PROMPT-SUGGEST-004.1 AC-UI-PROMPT-SUGGEST-004.2 AC-UI-PROMPT-SUGGEST-004.3 AC-UI-PROMPT-SUGGEST-004.5 AC-UI-PROMPT-SUGGEST-004.6 AC-UI-PROMPT-SUGGEST-004.9
+// @covers AC-UI-PROMPT-SUGGEST-002.1 AC-UI-PROMPT-SUGGEST-002.3 AC-UI-PROMPT-SUGGEST-004.1 AC-UI-PROMPT-SUGGEST-004.2 AC-UI-PROMPT-SUGGEST-004.3 AC-UI-PROMPT-SUGGEST-004.5 AC-UI-PROMPT-SUGGEST-004.6 AC-UI-PROMPT-SUGGEST-004.9
 test("native suggestion shows as ghost text, fills with Tab, sends with the submit key, and dismisses with Escape", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
   test.setTimeout(120_000);
-  await setPromptSuggestions(apiClient, true, false);
-  const executeCalls = countExecuteRequests(testPage);
+  await setPromptSuggestions(apiClient, true);
   try {
     const session = await seedIdleSession(
       testPage,
@@ -64,9 +55,8 @@ test("native suggestion shows as ghost text, fills with Tab, sends with the subm
     await testPage.keyboard.press("Escape");
     await expect(ghost).toHaveCount(0);
     await expect(accept).toHaveCount(0);
-    expect(executeCalls).toHaveLength(0);
   } finally {
-    await setPromptSuggestions(apiClient, false, false);
+    await setPromptSuggestions(apiClient, false);
   }
 });
 
@@ -77,7 +67,7 @@ test("the send button sends the visible suggestion from an empty draft", async (
   seedData,
 }) => {
   test.setTimeout(120_000);
-  await setPromptSuggestions(apiClient, true, false);
+  await setPromptSuggestions(apiClient, true);
   try {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Send button suggestion");
     const chat = session.activeChat();
@@ -88,109 +78,53 @@ test("the send button sends the visible suggestion from an empty draft", async (
     await expect(chat.getByText(NATIVE_SUGGESTION, { exact: true }).first()).toBeVisible();
     await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
   } finally {
-    await setPromptSuggestions(apiClient, false, false);
+    await setPromptSuggestions(apiClient, false);
   }
 });
 
-// @covers AC-UI-PROMPT-SUGGEST-003.1 AC-UI-PROMPT-SUGGEST-003.2
-test("sessions without native suggestions use the utility fallback once per turn", async ({
+// @covers AC-UI-PROMPT-SUGGEST-003.2 AC-UI-PROMPT-SUGGEST-003.3 AC-UI-PROMPT-SUGGEST-004.7
+test("a suggestion from an older turn stays hidden after a turn without one, including after a reload", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
   test.setTimeout(120_000);
-  // Launched with suggestions off, so the agent was never asked for native
-  // suggestions and the session is not native.
-  await setPromptSuggestions(apiClient, false, false);
-  const bodies: Record<string, unknown>[] = [];
-  await testPage.route(EXECUTE_URL, async (route) => {
-    bodies.push(route.request().postDataJSON() as Record<string, unknown>);
-    await route.fulfill({
-      json: { success: true, call_id: "call-stub", response: FALLBACK_SUGGESTION },
-    });
-  });
+  await setPromptSuggestions(apiClient, true);
   try {
-    const session = await seedIdleSession(
+    const session = await seedIdleSession(testPage, apiClient, seedData, "Stale suggestion");
+    const chat = session.activeChat();
+    const ghost = chat.locator("p.has-prompt-suggestion");
+    const editor = chat.locator(".tiptap.ProseMirror:visible");
+    await expect(ghost).toHaveAttribute("data-prompt-suggestion", NATIVE_SUGGESTION);
+
+    // The mock agent suppresses the native suggestion for this turn, so the
+    // stored suggestion still belongs to the previous turn.
+    await editor.click();
+    await testPage.keyboard.type(`${NO_SUGGESTION_DIRECTIVE} summarize`);
+    await chat.getByTestId("submit-message-button").click();
+    await expect(chat.getByText(`${NO_SUGGESTION_DIRECTIVE} summarize`).first()).toBeVisible();
+    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
+    await dwell(
       testPage,
-      apiClient,
-      seedData,
-      "Fallback prompt suggestion",
+      1_500,
+      "negative-assertion",
+      "a native suggestion arrives about 150 ms after the turn; none may appear for a suppressed turn",
     );
-    const requested = testPage.waitForRequest(EXECUTE_URL);
-    await setPromptSuggestions(apiClient, true, true);
-    await requested;
-    const ghost = session.activeChat().locator("p.has-prompt-suggestion");
-    await expect(ghost).toHaveAttribute("data-prompt-suggestion", FALLBACK_SUGGESTION);
-    expect(bodies).toHaveLength(1);
-    // @covers AC-UI-PROMPT-SUGGEST-003.9
-    expect(bodies[0]).toMatchObject({
-      utility_agent_id: "builtin-suggest-next-prompt",
-      session_id: "",
-      fallback_agent_profile_id: seedData.agentProfileId,
-    });
-    expect(String(bodies[0].conversation_history)).toContain("Agent: ");
+    await expect(ghost).toHaveCount(0);
+    await expect(chat.getByTestId("prompt-suggestion-accept")).toHaveCount(0);
 
     await testPage.reload();
     await session.composerReady();
-    await expect(ghost).toHaveAttribute("data-prompt-suggestion", FALLBACK_SUGGESTION);
-    expect(bodies).toHaveLength(1);
-  } finally {
-    await setPromptSuggestions(apiClient, false, false);
-  }
-});
-
-// @covers AC-UI-PROMPT-SUGGEST-004.5
-test("a suggestion that arrives while the user is typing never overwrites the draft", async ({
-  testPage,
-  apiClient,
-  seedData,
-}) => {
-  test.setTimeout(120_000);
-  await setPromptSuggestions(apiClient, false, false);
-  await testPage.route(EXECUTE_URL, async (route) => {
-    await injectLatency(2_000, "the user starts typing before the fallback suggestion arrives");
-    await route.fulfill({
-      json: { success: true, call_id: "call-stub", response: FALLBACK_SUGGESTION },
-    });
-  });
-  try {
-    const session = await seedIdleSession(
-      testPage,
-      apiClient,
-      seedData,
-      "Typing before suggestion",
-    );
-    const chat = session.activeChat();
-    const editor = chat.locator(".tiptap.ProseMirror:visible");
-    const ghost = chat.locator("p.has-prompt-suggestion");
-    await editor.click();
-
-    const requested = testPage.waitForRequest(EXECUTE_URL);
-    const answered = testPage.waitForResponse(EXECUTE_URL);
-    await setPromptSuggestions(apiClient, true, true);
-    await requested;
-    await testPage.keyboard.type("my own draft");
-    await answered;
-    await expect(editor).toHaveText("my own draft");
     await expect(ghost).toHaveCount(0);
-
-    await testPage.keyboard.press("ControlOrMeta+A");
-    await testPage.keyboard.press("Backspace");
-    await expect(ghost).toHaveAttribute("data-prompt-suggestion", FALLBACK_SUGGESTION);
   } finally {
-    await setPromptSuggestions(apiClient, false, false);
+    await setPromptSuggestions(apiClient, false);
   }
 });
 
 // @covers AC-UI-PROMPT-SUGGEST-001.2
-test("no suggestion and no request while the preference is off", async ({
-  testPage,
-  apiClient,
-  seedData,
-}) => {
+test("no suggestion while the preference is off", async ({ testPage, apiClient, seedData }) => {
   test.setTimeout(120_000);
-  await setPromptSuggestions(apiClient, false, true);
-  const executeCalls = countExecuteRequests(testPage);
+  await setPromptSuggestions(apiClient, false);
   const session = await seedIdleSession(testPage, apiClient, seedData, "Suggestions off");
   await session.composerReady();
   await dwell(
@@ -200,8 +134,7 @@ test("no suggestion and no request while the preference is off", async ({
     "a native suggestion arrives about 150 ms after the turn; none may appear while the preference is off",
   );
   await expect(session.activeChat().locator("p.has-prompt-suggestion")).toHaveCount(0);
-  expect(executeCalls).toHaveLength(0);
-  await setPromptSuggestions(apiClient, false, false);
+  await setPromptSuggestions(apiClient, false);
 });
 
 // @covers AC-UI-PROMPT-SUGGEST-004.6 AC-UI-PROMPT-SUGGEST-004.8
@@ -210,7 +143,7 @@ test("Quick Chat: Escape dismisses the suggestion and keeps the dialog open", as
   apiClient,
 }) => {
   test.setTimeout(120_000);
-  await setPromptSuggestions(apiClient, true, false);
+  await setPromptSuggestions(apiClient, true);
   try {
     const dialog = await openQuickChatWithAgent(testPage);
     const ghost = dialog.locator("p.has-prompt-suggestion");
@@ -224,6 +157,53 @@ test("Quick Chat: Escape dismisses the suggestion and keeps the dialog open", as
     await testPage.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
   } finally {
-    await setPromptSuggestions(apiClient, false, false);
+    await setPromptSuggestions(apiClient, false);
   }
+});
+
+test.describe("agent without native suggestions", () => {
+  test.beforeAll(async ({ backend }) => {
+    // Without the claudeCode advertisement the session never negotiates native
+    // suggestions, like any agent that is not a Claude Code bridge.
+    await backend.restart({ KANDEV_MOCK_AGENT_PROMPT_QUEUEING: "false" });
+  });
+
+  test.afterAll(async ({ backend }) => {
+    await backend.restart();
+  });
+
+  // @covers AC-UI-PROMPT-SUGGEST-002.1 AC-UI-PROMPT-SUGGEST-003.1
+  test("keeps the normal composer and generates no replacement suggestion", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await setPromptSuggestions(apiClient, true);
+    const utilityCalls: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.url().includes("/api/v1/utility/execute")) utilityCalls.push(request.url());
+    });
+    try {
+      const session = await seedIdleSession(testPage, apiClient, seedData, "Unsupported agent");
+      const chat = session.activeChat();
+      const editor = chat.locator(".tiptap.ProseMirror:visible");
+      await dwell(
+        testPage,
+        1_500,
+        "negative-assertion",
+        "a native suggestion arrives about 150 ms after the turn; none may appear without native support",
+      );
+      await expect(chat.locator("p.has-prompt-suggestion")).toHaveCount(0);
+      await expect(chat.getByTestId("prompt-suggestion-accept")).toHaveCount(0);
+
+      await editor.click();
+      await testPage.keyboard.press("Tab");
+      await expect(editor).toHaveText("");
+      await expect(chat.locator("p.has-prompt-suggestion")).toHaveCount(0);
+      expect(utilityCalls).toHaveLength(0);
+    } finally {
+      await setPromptSuggestions(apiClient, false);
+    }
+  });
 });

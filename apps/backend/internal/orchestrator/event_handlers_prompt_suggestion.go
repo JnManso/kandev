@@ -17,8 +17,8 @@ import (
 // on the session so a reload restores it while its turn is still the latest.
 const promptSuggestionMetadataKey = "prompt_suggestion"
 
-// promptSuggestionSourceMetadataKey records whether the session's agent was
-// asked for native suggestions, so the composer skips the utility fallback.
+// promptSuggestionSourceMetadataKey records whether the session negotiated
+// native suggestions. The composer shows a suggestion only for a native session.
 const promptSuggestionSourceMetadataKey = "prompt_suggestion_source"
 
 const (

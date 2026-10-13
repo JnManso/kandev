@@ -2,18 +2,17 @@ package store
 
 import "testing"
 
-// TestScanUserSettingsPromptSuggestionsDefault verifies both prompt suggestion flags default to false and honor explicit values.
+// TestScanUserSettingsPromptSuggestionsDefault verifies the prompt suggestion flag defaults to false and honors explicit values.
 func TestScanUserSettingsPromptSuggestionsDefault(t *testing.T) {
 	tests := []struct {
-		name         string
-		raw          string
-		wantMain     bool
-		wantFallback bool
+		name string
+		raw  string
+		want bool
 	}{
 		{name: "empty settings disable suggestions", raw: `{}`},
 		{name: "missing settings disable suggestions", raw: `{"chat_submit_key":"enter"}`},
-		{name: "explicit main only", raw: `{"prompt_suggestions":true}`, wantMain: true},
-		{name: "explicit both", raw: `{"prompt_suggestions":true,"prompt_suggestions_fallback":true}`, wantMain: true, wantFallback: true},
+		{name: "explicit on", raw: `{"prompt_suggestions":true}`, want: true},
+		{name: "explicit off", raw: `{"prompt_suggestions":false}`},
 	}
 
 	for _, tt := range tests {
@@ -22,9 +21,8 @@ func TestScanUserSettingsPromptSuggestionsDefault(t *testing.T) {
 			if err != nil {
 				t.Fatalf("scan settings: %v", err)
 			}
-			if settings.PromptSuggestions != tt.wantMain || settings.PromptSuggestionsFallback != tt.wantFallback {
-				t.Fatalf("flags = (%v, %v), want (%v, %v)",
-					settings.PromptSuggestions, settings.PromptSuggestionsFallback, tt.wantMain, tt.wantFallback)
+			if settings.PromptSuggestions != tt.want {
+				t.Fatalf("PromptSuggestions = %v, want %v", settings.PromptSuggestions, tt.want)
 			}
 		})
 	}

@@ -235,18 +235,14 @@ describe("agent-generated task title defaults", () => {
   });
 });
 
-// @covers AC-UI-PROMPT-SUGGEST-001.1 AC-UI-PROMPT-SUGGEST-001.5
+// @covers AC-UI-PROMPT-SUGGEST-001.1
 describe("prompt suggestion preference defaults", () => {
-  it("defaults both switches to disabled", () => {
-    const fields = buildCoreFields({});
-    expect(fields.promptSuggestions).toBe(false);
-    expect(fields.promptSuggestionsFallback).toBe(false);
+  it("defaults the switch to disabled", () => {
+    expect(buildCoreFields({}).promptSuggestions).toBe(false);
   });
 
   it("maps explicit values", () => {
-    const fields = buildCoreFields({ prompt_suggestions: true, prompt_suggestions_fallback: true });
-    expect(fields.promptSuggestions).toBe(true);
-    expect(fields.promptSuggestionsFallback).toBe(true);
+    expect(buildCoreFields({ prompt_suggestions: true }).promptSuggestions).toBe(true);
   });
 });
 

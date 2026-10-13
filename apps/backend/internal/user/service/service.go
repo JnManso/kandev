@@ -66,7 +66,6 @@ type UpdateUserSettingsRequest struct {
 	UnreadDivider                     *bool
 	AgentGeneratedTaskTitles          *bool
 	PromptSuggestions                 *bool
-	PromptSuggestionsFallback         *bool
 	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
@@ -714,9 +713,6 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	if req.PromptSuggestions != nil {
 		settings.PromptSuggestions = *req.PromptSuggestions
 	}
-	if req.PromptSuggestionsFallback != nil {
-		settings.PromptSuggestionsFallback = *req.PromptSuggestionsFallback
-	}
 	if req.AutoFocusNewTasks != nil {
 		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
 	}
@@ -1219,7 +1215,6 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
 		"prompt_suggestions":                       settings.PromptSuggestions,
-		"prompt_suggestions_fallback":              settings.PromptSuggestionsFallback,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,

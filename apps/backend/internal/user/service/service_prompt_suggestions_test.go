@@ -11,29 +11,28 @@ import (
 	"github.com/kandev/kandev/internal/user/store"
 )
 
-// TestApplyBasicSettingsPromptSuggestions verifies both prompt suggestion flags are preserved when omitted and applied when provided.
+// TestApplyBasicSettingsPromptSuggestions verifies the prompt suggestion flag is preserved when omitted and applied when provided.
 func TestApplyBasicSettingsPromptSuggestions(t *testing.T) {
 	settings := &models.UserSettings{}
 	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
 		t.Fatalf("apply omitted settings: %v", err)
 	}
-	if settings.PromptSuggestions || settings.PromptSuggestionsFallback {
-		t.Fatal("prompt suggestion flags changed on omitted patch")
+	if settings.PromptSuggestions {
+		t.Fatal("prompt suggestion flag changed on omitted patch")
 	}
 
-	req := &UpdateUserSettingsRequest{PromptSuggestions: ptr(true), PromptSuggestionsFallback: ptr(true)}
-	if err := applyBasicSettings(settings, req); err != nil {
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{PromptSuggestions: ptr(true)}); err != nil {
 		t.Fatalf("apply enabled settings: %v", err)
 	}
-	if !settings.PromptSuggestions || !settings.PromptSuggestionsFallback {
-		t.Fatal("prompt suggestion flags = false, want true")
+	if !settings.PromptSuggestions {
+		t.Fatal("PromptSuggestions = false, want true")
 	}
 
-	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{PromptSuggestionsFallback: ptr(false)}); err != nil {
-		t.Fatalf("apply disabled fallback: %v", err)
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{PromptSuggestions: ptr(false)}); err != nil {
+		t.Fatalf("apply disabled settings: %v", err)
 	}
-	if !settings.PromptSuggestions || settings.PromptSuggestionsFallback {
-		t.Fatal("expected main on and fallback off")
+	if settings.PromptSuggestions {
+		t.Fatal("PromptSuggestions = true, want false")
 	}
 }
 

@@ -18,13 +18,17 @@ legacy_specs: []
 The feature shows the user's likely next prompt as ghost text in the empty
 composer. Tab fills it in for editing, Enter sends it, and Escape dismisses it.
 
-- **Claude sessions** use Claude Code's native suggestion. Claude Code forks the
-  conversation with the prompt cache warm. Measured locally, the suggestion
-  arrives about 1.7 seconds after the turn result.
-- **Other agents** use the `suggest-next-prompt` utility agent. It follows the
-  same rules, takes 3 to 8 seconds, and is capped at 15 seconds.
+Suggestions are native only. Claude sessions use Claude Code's own suggestion:
+Claude Code forks the conversation with the prompt cache warm, and measured
+locally the suggestion arrives about 1.7 seconds after the turn result. Agents
+without native support keep the composer's normal behavior, and Kandev never
+generates a replacement.
 
 The preference is opt-in per user.
+
+The first version also ran a utility-agent fallback for other agents. The
+maintainer review of kdlbs/kandev#4306 asked for native suggestions only, and
+Task 04 removed the fallback.
 
 ### Evidence gathered during design
 
@@ -54,9 +58,7 @@ The preference is opt-in per user.
 
 ### In scope
 
-- The opt-in preference and a separate opt-in fallback switch, which reveals an
-  agent profile selector bound to the `suggest-next-prompt` built-in. Plus docs.
-- The `suggest-next-prompt` utility built-in for the fallback.
+- The opt-in preference, plus docs.
 - An ACP SDK fork change so extension notifications reach the client.
 - Native delivery for Claude sessions:
   - Claude `_meta` on session new and load;
@@ -65,13 +67,14 @@ The preference is opt-in per user.
   - the orchestrator's state-guarded metadata write;
   - the `session.prompt_suggestion` WebSocket event;
   - mock agent support.
-- The fallback in the browser: viewer-only, one request per turn, a 15-second
-  abort, Claude-style filters, and a browser cache.
+- No suggestion, and no generated replacement, for sessions without native
+  support or turns without a native suggestion.
 - Ghost text, the Tab, Enter, and Escape keys, a tap-to-accept chip, and both
   task chat and Quick Chat on desktop and phone.
 
 ### Out of scope
 
+- Model-generated or utility-agent suggestions.
 - Native sources other than Claude.
 - Pausing native generation when no browser shows the session.
 - Kandev-side back-off, and multiple suggestions.
@@ -82,9 +85,10 @@ The preference is opt-in per user.
 
 | Order | Work order | Wave | Depends on |
 | --- | --- | --- | --- |
-| 1 | [Task 01: Preference and fallback utility agent](task-01-suggestion-agent-and-preference.md) | 1 | none |
+| 1 | [Task 01: Prompt suggestion preference](task-01-suggestion-agent-and-preference.md) | 1 | none |
 | 2 | [Task 02: Native Claude suggestion delivery](task-02-native-suggestion-delivery.md) | 2 | 01 |
-| 3 | [Task 03: Composer suggestion UI and fallback](task-03-composer-prompt-suggestion.md) | 3 | 01, 02 |
+| 3 | [Task 03: Composer suggestion UI](task-03-composer-prompt-suggestion.md) | 3 | 01, 02 |
+| 4 | [Task 04: Native-only scope](task-04-native-only-scope.md) | 4 | 03 |
 
 The order is strictly sequential. Task 02's launch path reads the preference
 that Task 01 adds. Task 03 consumes both the preference and the native event.
@@ -94,7 +98,7 @@ Task 01, because it is in another repository.
 - [x] Task 01
 - [x] Task 02 (waiting on kdlbs/acp-go-sdk#6; `go.mod` uses the JnManso fork until it merges)
 - [x] Task 03
-- [x] [Task 04: Session-profile fallback for suggestions](task-04-session-profile-fallback.md)
+- [x] Task 04
 
 ## Technical approach
 
@@ -120,9 +124,9 @@ See the system design for contracts. Highlights:
    - Add `handlePromptSuggestionEvent`, which writes `prompt_suggestion` with
      `SetSessionMetadataKeyIfState` and publishes `session.prompt_suggestion`.
 4. **Frontend.**
-   - Add the `promptSuggestions` slice and the WebSocket handler, seeded from
-     session metadata.
-   - Add the pure helpers and the hook.
+   - Add the WebSocket handler that writes session metadata.
+   - Add the pure helpers and the hook. They select a native suggestion only
+     for a native session and its own turn, and never request one.
    - Add the placeholder decoration, the keymap, the hint chip, and the
      settings switch.
 
@@ -134,7 +138,7 @@ Structural choices are requirements:
 - the hint chip sits in the composer's trailing hint slot;
 - on desktop the chip shows `Tab`, and Enter sends;
 - on phones the chip is a "Use reply" button at least 44 px tall;
-- the settings rows live in the Conversation tab of Task behavior.
+- the settings row lives in the Conversation tab of Task behavior.
 
 Exact copy and spacing are illustrative. Use existing tokens and localized
 strings.
@@ -184,61 +188,36 @@ Same composition. The ghost text wraps, and the chip is a touch button. Maps to
 
 ### UI-04: Settings > Task behavior > Conversation
 
-Maps to `AC-UI-PROMPT-SUGGEST-001.1`, `.4`, `.5`, and `.6`.
-
-Main switch off (fallback controls hidden):
-
-```text
-+--------------------------------------------------------------------+
-| Suggest next prompt                                   (i)  [ off ] |
-| Show a suggested reply after each agent turn.                      |
-+--------------------------------------------------------------------+
-```
-
-Main switch on, fallback on:
+Maps to `AC-UI-PROMPT-SUGGEST-001.1` and `.4`.
 
 ```text
 +--------------------------------------------------------------------+
 | Suggest next prompt                                   (i)  [ on  ] |
 | Show a suggested reply after each agent turn.                      |
-|   (i) Claude sessions use Claude's own suggestions from their next |
-|       start.                                                       |
-|                                                                    |
-|   Use a utility agent when the agent has no                (i) [on]|
-|   native suggestions                                               |
-|   One extra agent call per turn. Slower than native.               |
-|                                                                    |
-|   Agent profile   [ Default utility agent profile          v ]     |
-|   Same setting as Utility Agents > suggest-next-prompt.            |
+|   (i) Only agents with native suggestions, such as Claude Code,    |
+|       suggest replies, from their next start.                      |
 +--------------------------------------------------------------------+
 ```
 
-Phone: the same rows stack vertically, as other settings rows do. The switches
-and the selector keep their touch targets.
+Phone: the row stacks vertically, as other settings rows do. The switch keeps
+its touch target.
 
 ## Tests
 
 | Acceptance criterion | Evidence |
 | --- | --- |
 | `AC-UI-PROMPT-SUGGEST-001.1` | Go settings default test. Settings E2E. |
-| `AC-UI-PROMPT-SUGGEST-001.2` | Launch-flag Go test with the preference off. Hook unit test. E2E with the preference off. |
+| `AC-UI-PROMPT-SUGGEST-001.2` | Launch-flag Go test with the preference off. Selection unit test. E2E with the preference off. |
 | `AC-UI-PROMPT-SUGGEST-001.3` | Go settings round-trip test. Settings E2E reload. |
 | `AC-UI-PROMPT-SUGGEST-001.4` | Hook unit test of immediate rendering after a toggle. Help-text keys. |
-| `AC-UI-PROMPT-SUGGEST-001.5` | Go settings default and round-trip test. Settings E2E: the fallback switch is hidden while the main switch is off. Hook unit test: no fallback without it. |
-| `AC-UI-PROMPT-SUGGEST-001.6` | Settings E2E: picking a profile in General shows the same profile in Utility Agents. Unresolvable-profile message. |
-| `AC-UI-PROMPT-SUGGEST-002.1` | Launch-flag Go tests (Claude, mock, others). Dialect `_meta` unit test. |
-| `AC-UI-PROMPT-SUGGEST-002.2` | Orchestrator handler Go test (metadata and event). WebSocket handler unit test. E2E with the mock agent, including reload. |
-| `AC-UI-PROMPT-SUGGEST-002.3` | agentctl stale-drop unit test. State-guarded write Go test. |
-| `AC-UI-PROMPT-SUGGEST-002.4` | Launch-flag Go tests for Office, automation, utility, and passthrough sessions. |
-| `AC-UI-PROMPT-SUGGEST-002.5` | Hook unit test: no fallback for a native session. E2E route assertion. |
-| `AC-UI-PROMPT-SUGGEST-003.1` | Hook unit test of the payload and immediate start. E2E fallback route assertion. |
-| `AC-UI-PROMPT-SUGGEST-003.2` | Hook unit test of the cache hit. E2E reload. |
-| `AC-UI-PROMPT-SUGGEST-003.3` | Eligibility unit tests. |
-| `AC-UI-PROMPT-SUGGEST-003.4` | Fake-timer abort unit test. E2E with a delayed stub. |
-| `AC-UI-PROMPT-SUGGEST-003.5` | Go template content test. |
-| `AC-UI-PROMPT-SUGGEST-003.6` | Normalization table test. |
-| `AC-UI-PROMPT-SUGGEST-003.7` | Hook failure unit test. |
-| `AC-UI-PROMPT-SUGGEST-003.8` | Go seed test. Utility agents settings E2E. |
+| `AC-UI-PROMPT-SUGGEST-002.1` | Launch-flag Go tests (Claude, mock, others). Adapter `_meta` unit test. |
+| `AC-UI-PROMPT-SUGGEST-002.2` | Capability-record Go test. Selection unit test: a non-native session with a suggestion payload shows nothing. |
+| `AC-UI-PROMPT-SUGGEST-002.3` | Orchestrator handler Go test (metadata and event). WebSocket handler unit test. E2E with the mock agent, including reload. |
+| `AC-UI-PROMPT-SUGGEST-002.4` | agentctl stale-drop unit test. State-guarded write Go test. |
+| `AC-UI-PROMPT-SUGGEST-002.5` | Launch-flag Go tests for Office, automation, utility, and passthrough sessions. |
+| `AC-UI-PROMPT-SUGGEST-003.1` | Selection unit test. E2E: a non-native agent keeps the normal placeholder and Tab behavior. |
+| `AC-UI-PROMPT-SUGGEST-003.2` | Selection unit test with no native payload. |
+| `AC-UI-PROMPT-SUGGEST-003.3` | Selection and hook unit tests for a suggestion bound to an older turn. |
 | `AC-UI-PROMPT-SUGGEST-004.1`–`.9` | Decoration and keymap unit tests. Desktop, Quick Chat, and phone E2E. `i18n:check`. |
 
 ## E2E tests
@@ -246,20 +225,15 @@ and the selector keep their touch targets.
 - `apps/web/e2e/tests/chat/prompt-suggestions.spec.ts` (desktop):
   - **Native (mock agent).**
     1. Enable the preference and start a task.
-    2. Complete one turn, and assert the ghost text and chip with no
-       `/api/v1/utility/execute` call.
+    2. Complete one turn, and assert the ghost text and chip.
     3. Press Tab, assert the draft, then clear it.
     4. Assert the ghost text returns. Press Enter and assert the suggestion was
        sent as a user message.
     5. After the next turn, press Escape and assert it is dismissed.
     6. Reload and assert the latest native suggestion is restored.
-  - **Fallback.**
-    1. Start a session with the preference off, then turn on the main and
-       fallback switches, so the session is not native.
-    2. Stub the execute route and complete a turn.
-    3. Assert the request payload, the ghost text, and that a reload makes no
-       second request.
-    4. Delay the stub past a shortened budget and assert no ghost text.
+  - **Unsupported agent.** With the preference on, a mock agent that does not
+    advertise Claude Code completes a turn. Assert no ghost text and no chip,
+    and that Tab keeps its existing behavior.
   - **Quick Chat.** Escape dismisses the suggestion and keeps the dialog open.
 - `apps/web/e2e/tests/chat/mobile-prompt-suggestions.spec.ts` (`mobile-chrome`):
   the "Use reply" chip is at least 44 px and fills the draft.
@@ -269,7 +243,7 @@ and the selector keep their touch targets.
 ```bash
 cd apps && pnpm install --frozen-lockfile
 cd apps/backend && go test ./internal/agentctl/server/acp/... ./internal/agentctl/server/adapter/transport/acp/... \
-  ./internal/orchestrator/... ./internal/agent/agents/... ./internal/utility/... ./internal/user/... \
+  ./internal/orchestrator/... ./internal/agent/agents/... ./internal/user/... \
   ./internal/settingscatalog/... ./cmd/mock-agent/...
 cd apps/web && pnpm test -- lib/prompt-suggestion.test.ts hooks/use-prompt-suggestion.test.ts \
   components/task/chat/tiptap-dynamic-placeholder.test.ts lib/ws/handlers/prompt-suggestions.test.ts
@@ -295,8 +269,7 @@ results.
   forwarding. A dialect unit test pins the `_meta` shape, and the mock agent
   mirrors the frame. Re-run the `/acp-debug` probe on every adapter bump.
 - **Native silence.** Claude Code suppresses early turns, cold-cache turns, plan
-  mode, and unused streaks. Native sessions then show nothing, by design, and
-  never fall back.
+  mode, and unused streaks. Native sessions then show nothing, by design.
 - **Unviewed sessions.** Native generation still runs when nobody is watching.
   Its cost is a cache read plus a short suffix. Office and automation sessions
   never request it.
@@ -305,17 +278,17 @@ results.
   visible. Enter with a menu open is unchanged.
 - **Tab and Escape regressions.** Claim these keys only when ghost text is
   visible.
-- **Fallback quality.** The original Kandev prompt may underperform Claude
-  Code's. Users can edit it in Settings > Utility Agents.
+- **Coverage limited to Claude Code.** Other agents show no suggestion until
+  they expose a native source.
 
 ## Public documentation
 
-Update `docs/public/developer-tools.md`: add the `suggest-next-prompt`
-built-in, and a "Prompt suggestions" section covering the switch, native versus
-fallback, Tab, Enter, Escape, and tap, and the next-session-start note. Run
+Update `docs/public/developer-tools.md` with a "Prompt suggestions" section
+covering the switch, which agents support it, Tab, Enter, Escape, and tap, and
+the next-session-start note. Run
 `/docs-maintainer` in Task 01 and again in Task 03 for the key behavior.
 
 ## Decisions
 
-No ADR. The design reuses ACP `_meta`, extension notifications, session
-metadata, and utility execution.
+No ADR. The design reuses ACP `_meta`, extension notifications, and session
+metadata.
