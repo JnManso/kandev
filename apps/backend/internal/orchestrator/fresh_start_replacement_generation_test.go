@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -18,9 +19,7 @@ const (
 	freshStartIncarnation = "incarnation-fresh-start"
 )
 
-func seedCommittedFirstGeneration(t *testing.T) (*Service, interface {
-	GetCurrentHarnessSessionGeneration(context.Context, string, string) (*models.HarnessSessionGeneration, error)
-}) {
+func seedCommittedFirstGeneration(t *testing.T) (*Service, *sqliterepo.Repository) {
 	t.Helper()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, freshStartTaskID, freshStartSessionID, models.TaskSessionStateFailed)
@@ -55,7 +54,7 @@ func freshStartSessionCreated(generation uint64, replaces bool) watcher.ACPSessi
 func TestFreshStartSessionCreatedCommitsReplacementGeneration(t *testing.T) {
 	svc, repo := seedCommittedFirstGeneration(t)
 
-	svc.persistInitialHarnessGeneration(context.Background(), freshStartSessionCreated(2, true))
+	svc.persistInitialHarnessGeneration(context.Background(), freshStartSessionCreated(2, true), true)
 
 	current, err := repo.GetCurrentHarnessSessionGeneration(context.Background(), freshStartSessionID, freshStartIncarnation)
 	if err != nil {
@@ -80,7 +79,7 @@ func TestSessionCreatedWithoutReplacementKeepsCommittedGeneration(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			svc, repo := seedCommittedFirstGeneration(t)
 
-			svc.persistInitialHarnessGeneration(context.Background(), tc.data)
+			svc.persistInitialHarnessGeneration(context.Background(), tc.data, true)
 
 			current, err := repo.GetCurrentHarnessSessionGeneration(context.Background(), freshStartSessionID, freshStartIncarnation)
 			if err != nil {

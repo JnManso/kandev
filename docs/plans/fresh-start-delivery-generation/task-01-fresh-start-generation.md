@@ -18,6 +18,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
   - ../../specs/platform/system-design/durable-agent-delivery.md
+  - ../../specs/agents/system-design/agent-resume-runtime-recovery.md
 ---
 
 # Task 01: Fresh start advances the delivery generation
@@ -43,7 +44,8 @@ In scope:
   successor-generation wait (`durable_silent_restore_generation.go`).
 - The ACP session-created payload carries the mark. On that event the
   orchestrator commits generation N+1 with a predecessor compare-and-set and
-  creation reason `native_replaced` (`agent/runtime/lifecycle/events.go`,
+  creation reason `native_replaced`, only after the event's resume token is
+  accepted for the current execution (`agent/runtime/lifecycle/events.go`,
   `orchestrator/watcher/watcher.go`, `orchestrator/event_handlers.go`).
 
 Exclusions: no change to Resume identity, block resolution, UI, schema, metrics,
@@ -69,6 +71,10 @@ its scheduler without a recovery action, so it is not covered here.
   failed on main because the launch carried generation 1, then passed.
   `TestFreshStartSessionCreatedCommitsReplacementGeneration` and
   `TestSessionCreatedWithoutReplacementKeepsCommittedGeneration` cover the commit.
+  `TestFreshStartSessionCreatedFromRotatedExecutionKeepsGeneration` failed while
+  a rejected resume token still committed the replacement, then passed;
+  `TestFreshStartSessionCreatedCommitsReplacementForOwningExecution` covers the
+  accepted path.
 - `orchestrator/executor`: `TestFreshStartResumeRequestReplacesNativeConversation`
   and the `TestApplyDeliveryIdentity*` fresh-start, first-generation, and
   process-replacement cases.
@@ -107,3 +113,7 @@ GREEN: all listed race suites pass, and backend lint reports no issues.
 The full `internal/orchestrator/...` and `internal/agent/runtime/lifecycle/...`
 packages also pass without the race detector. No live session, journal, or
 database was mutated.
+
+PR review follow-up: the replacement commit now requires accepted resume-token
+storage, so a session-created event from a rotated execution leaves the current
+generation unchanged. The full `internal/orchestrator/...` packages pass.
