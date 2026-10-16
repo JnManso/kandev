@@ -92,10 +92,11 @@ cd apps/backend
 go test -trimpath -race -tags fts5 ./internal/orchestrator/executor ./internal/orchestrator/watcher ./internal/backendapp -count=1
 go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'Test(RecoverSession|FreshStart|ContextContinuation|Continuation|SessionDelivery|NativeResume|SessionCreated|ResumeCallbacks|WorkspaceRecoveryBlock|RestartRecovery)' -count=1
 go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(ResumedDelivery|DeliveryPreflight|RetireUnresolved|ContextContinuation|FreshStart|Replacement|SilentRestore|DurableRetention|StreamProcessor|DeliveryRetention|ToAgentExecution|ACPSessionCreated|Launch)' -count=1
-golangci-lint run ./... --new-from-rev=a02db60951 --timeout=10m
 ```
 
-From the repository root, run `make fmt`,
+From the repository root, run
+`bash scripts/lint-go-changed $(git diff --name-only origin/main...HEAD | grep '\.go$')`;
+CI owns full-backend lint. Also run `make fmt`,
 `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`,
 and `git diff --check`.
 
@@ -109,7 +110,7 @@ RED: the new tests failed for the expected reasons. The launch carried
 generation 1 and stream `:g1`, replacement events were rejected as an identity
 mismatch, and the session-created event left generation 1 current.
 
-GREEN: all listed race suites pass, and backend lint reports no issues.
+GREEN: all listed race suites pass, and changed-file Go lint reports no issues.
 The full `internal/orchestrator/...` and `internal/agent/runtime/lifecycle/...`
 packages also pass without the race detector. No live session, journal, or
 database was mutated.
