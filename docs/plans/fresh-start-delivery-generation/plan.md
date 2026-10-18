@@ -97,6 +97,11 @@ the UI does not offer it for this failure.
 
 ## Results
 
-Task 01 is done. The regression tests failed before the correction and pass
-after it. The targeted race suites, backend lint, and specification validators
-pass. The details are in the work order.
+The author's original local verification is historical and has not been used
+as delivery proof. Review added real-store schedules for execution rotation
+after token acceptance, foreign identities, predecessor block retention, and
+first-generation compatibility. Registered agentctl retirement and SQL-backed
+successor waiting cover nondispatch, successful admission, cancellation, and
+rejected commits. Hosted assertion and full-family verification gate delivery;
+exact source, run, attempt and artifact receipts are retained outside the
+repository by the delivery session.

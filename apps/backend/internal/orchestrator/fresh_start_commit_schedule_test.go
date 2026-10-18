@@ -87,7 +87,12 @@ func TestFreshStartCommitForeignIdentity(t *testing.T) {
 			case "empty execution":
 				event.AgentExecutionID = ""
 			}
+			before, err := repo.GetExecutorRunningBySessionID(t.Context(), original.SessionID)
+			require.NoError(t, err)
 			svc.handleACPSessionCreated(t.Context(), event)
+			after, err := repo.GetExecutorRunningBySessionID(t.Context(), original.SessionID)
+			require.NoError(t, err)
+			require.Equal(t, before.ResumeToken, after.ResumeToken, "foreign identity must not change the resume token")
 			current, err := repo.GetCurrentHarnessSessionGeneration(t.Context(), original.SessionID, original.DeliveryIncarnationID)
 			require.NoError(t, err)
 			require.EqualValues(t, 1, current.Generation, "foreign identity must not advance the owning generation")
@@ -118,4 +123,37 @@ func TestFreshStartCommitPreservesPredecessorBlock(t *testing.T) {
 	require.EqualValues(t, 1, stored.ExpectedGeneration, "fresh start retains the predecessor block as history")
 	require.Equal(t, models.RecoveryBlockOpen, stored.State)
 	require.Empty(t, stored.AuthorizedAction)
+}
+
+func TestFreshStartCommitFirstGenerationCompatibility(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, freshStartTaskID, freshStartSessionID, models.TaskSessionStateStarting)
+	seedExecutorRunning(t, repo, freshStartSessionID, freshStartTaskID, "fresh-start-execution")
+	session, err := repo.GetTaskSession(t.Context(), freshStartSessionID)
+	require.NoError(t, err)
+	event := freshStartSessionCreated(1, false)
+	event.DeliveryIncarnationID = session.QueueIncarnationID
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleACPSessionCreated(t.Context(), event)
+	current, err := repo.GetCurrentHarnessSessionGeneration(t.Context(), session.ID, session.QueueIncarnationID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, current.Generation)
+	require.Equal(t, "native_started", current.CreationReason)
+	require.Equal(t, event.ACPSessionID, current.NativeSessionID)
+}
+
+func TestFreshStartCommitStaleNativeAfterSuccessor(t *testing.T) {
+	svc, repo, event := freshStartCommitFixture(t)
+	manager := svc.agentManager.(*mockAgentManager)
+	manager.getACPSessionIDForSessionFunc = func(string) (string, bool) { return "replacement-native", true }
+	svc.handleACPSessionCreated(t.Context(), event)
+	event.ACPSessionID = "previous-native"
+	svc.handleACPSessionCreated(t.Context(), event)
+	current, err := repo.GetCurrentHarnessSessionGeneration(t.Context(), event.SessionID, event.DeliveryIncarnationID)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, current.Generation)
+	require.Equal(t, "replacement-native", current.NativeSessionID)
+	running, err := repo.GetExecutorRunningBySessionID(t.Context(), event.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, "replacement-native", running.ResumeToken)
 }

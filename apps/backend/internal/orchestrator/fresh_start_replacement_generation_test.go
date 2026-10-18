@@ -19,24 +19,11 @@ const (
 	freshStartIncarnation = "incarnation-fresh-start"
 )
 
-func seedCommittedFirstGeneration(t *testing.T) (*Service, *sqliterepo.Repository) {
+func seedCommittedFirstGeneration(t *testing.T) (*Service, *sqliterepo.Repository, watcher.ACPSessionEventData) {
 	t.Helper()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, freshStartTaskID, freshStartSessionID, models.TaskSessionStateFailed)
-	now := time.Now().UTC()
-	committed, err := repo.CommitHarnessSessionGeneration(context.Background(), &models.HarnessSessionGeneration{
-		SessionID:       freshStartSessionID,
-		IncarnationID:   freshStartIncarnation,
-		Generation:      1,
-		NativeSessionID: "previous-native",
-		CreationReason:  "native_started",
-		CreatedAt:       now,
-		CommittedAt:     now,
-	}, 0)
-	if err != nil || !committed {
-		t.Fatalf("seed first generation: committed=%v err=%v", committed, err)
-	}
-	return createTestService(repo, newMockStepGetter(), newMockTaskRepo()), repo
+	svc, repo, data := freshStartCommitFixture(t)
+	require.NoError(t, repo.UpdateResumeToken(t.Context(), data.SessionID, data.AgentExecutionID, data.ACPSessionID, ""))
+	return svc, repo, data
 }
 
 func freshStartSessionCreated(generation uint64, replaces bool) watcher.ACPSessionEventData {
@@ -52,11 +39,11 @@ func freshStartSessionCreated(generation uint64, replaces bool) watcher.ACPSessi
 }
 
 func TestFreshStartSessionCreatedCommitsReplacementGeneration(t *testing.T) {
-	svc, repo := seedCommittedFirstGeneration(t)
+	svc, repo, data := seedCommittedFirstGeneration(t)
 
-	svc.persistInitialHarnessGeneration(context.Background(), freshStartSessionCreated(2, true), true)
+	svc.persistInitialHarnessGeneration(context.Background(), data, true)
 
-	current, err := repo.GetCurrentHarnessSessionGeneration(context.Background(), freshStartSessionID, freshStartIncarnation)
+	current, err := repo.GetCurrentHarnessSessionGeneration(context.Background(), freshStartSessionID, data.DeliveryIncarnationID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +64,12 @@ func TestSessionCreatedWithoutReplacementKeepsCommittedGeneration(t *testing.T) 
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc, repo := seedCommittedFirstGeneration(t)
+			svc, repo, data := seedCommittedFirstGeneration(t)
 
+			tc.data.DeliveryIncarnationID = data.DeliveryIncarnationID
 			svc.persistInitialHarnessGeneration(context.Background(), tc.data, true)
 
-			current, err := repo.GetCurrentHarnessSessionGeneration(context.Background(), freshStartSessionID, freshStartIncarnation)
+			current, err := repo.GetCurrentHarnessSessionGeneration(context.Background(), freshStartSessionID, data.DeliveryIncarnationID)
 			if err != nil {
 				t.Fatal(err)
 			}

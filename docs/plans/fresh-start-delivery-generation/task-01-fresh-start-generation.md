@@ -45,8 +45,11 @@ In scope:
 - The ACP session-created payload carries the mark. On that event the
   orchestrator commits generation N+1 with a predecessor compare-and-set and
   creation reason `native_replaced`, only after the event's resume token is
-  accepted for the current execution (`agent/runtime/lifecycle/events.go`,
-  `orchestrator/watcher/watcher.go`, `orchestrator/event_handlers.go`).
+  accepted for the current execution. The generation transaction revalidates
+  task, incarnation, execution and native token while holding the executor
+  writer's SQL locks (`agent/runtime/lifecycle/events.go`,
+  `orchestrator/watcher/watcher.go`, `orchestrator/event_handlers.go`,
+  `task/repository/sqlite/session_continuity.go`).
 
 Exclusions: no change to Resume identity, block resolution, UI, schema, metrics,
 or legacy (non-durable) delivery. When no generation is committed,
@@ -118,3 +121,20 @@ database was mutated.
 PR review follow-up: the replacement commit now requires accepted resume-token
 storage, so a session-created event from a rotated execution leaves the current
 generation unchanged. The full `internal/orchestrator/...` packages pass.
+
+## Delivery review validation
+
+The original local RED/GREEN claims above are author-reported history, not
+hosted proof. Permanent delivery regressions now cover the real token-CAS to
+executor-rotation schedule, foreign task/incarnation/execution identities,
+adjacent predecessor CAS, first-generation and stale native-event controls,
+and predecessor block retention. The registered agentctl HTTP routes and real
+journal prove retirement without provider redispatch, with new work as the
+positive control. SQL-backed event admission covers a committed successor,
+cancellation, a rejected commit, and a delayed predecessor event.
+
+Hosted focused race tests, actual assertion RED/GREEN, SQLite/PostgreSQL store
+coverage, and complete Backend/Frontend/E2E families gate delivery. Exact
+source and hosted receipts live in the delivery session's external evidence
+directory. No contributor code, build, test, dependency install or cache has
+been executed on the review host.
