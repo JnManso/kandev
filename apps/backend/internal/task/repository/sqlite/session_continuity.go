@@ -12,6 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const nativeReplacementCreationReason = "native_replaced"
+
 const sessionContinuitySchema = `
 		CREATE TABLE IF NOT EXISTS harness_session_generations (
 			session_id TEXT NOT NULL,
@@ -220,11 +222,23 @@ func (r *Repository) commitHarnessSessionGeneration(
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) moveOpenRecoveryBlocksWithGenerationTx(
+	ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+) error {
 	// A context continuation publishes a replacement generation while the
 	// operator's recovery block is still the admission fence. Move that fence
 	// with the generation in the same transaction so a successful commit cannot
 	// leave an open block stranded on the predecessor generation.
-	if generation.Generation == expectedGeneration+1 && generation.CreationReason != "native_replaced" {
+	if generation.Generation == expectedGeneration+1 && generation.CreationReason != nativeReplacementCreationReason {
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE session_recovery_blocks
 			SET expected_generation = ?, updated_at = ?
@@ -233,13 +247,10 @@ func (r *Repository) commitHarnessSessionGeneration(
 			generation.Generation, generation.CommittedAt,
 			generation.SessionID, generation.IncarnationID,
 			expectedGeneration, models.RecoveryBlockOpen); err != nil {
-			return false, fmt.Errorf("move open recovery blocks with generation: %w", err)
+			return fmt.Errorf("move open recovery blocks with generation: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
+	return nil
 }
 
 func (r *Repository) harnessGenerationExecutionOwnsTx(

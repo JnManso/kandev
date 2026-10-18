@@ -92,7 +92,7 @@ func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watc
 		return
 	}
 	if current, currentErr := store.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID); currentErr == nil && current != nil {
-		if tokenAccepted && isAdjacentReplacement(current, data) {
+		if isAdjacentReplacement(current, data) {
 			s.commitReplacementHarnessGeneration(ctx, session, current, data)
 		}
 		return
@@ -101,6 +101,12 @@ func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watc
 			zap.String("session_id", data.SessionID), zap.Error(currentErr))
 		return
 	}
+	s.persistFirstHarnessGeneration(ctx, session, incarnationID, data)
+}
+
+func (s *Service) persistFirstHarnessGeneration(
+	ctx context.Context, session *models.TaskSession, incarnationID string, data watcher.ACPSessionEventData,
+) {
 	now := time.Now().UTC()
 	committed, err := s.commitOwnedHarnessGeneration(ctx, data, &models.HarnessSessionGeneration{
 		SessionID:         session.ID,
