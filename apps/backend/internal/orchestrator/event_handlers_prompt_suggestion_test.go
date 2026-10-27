@@ -29,15 +29,20 @@ func seedPromptSuggestionSession(t *testing.T, state models.TaskSessionState) (*
 }
 
 func promptSuggestionPayload(text string) *lifecycle.AgentStreamEventPayload {
+	return promptSuggestionPayloadForTurn(text, "turn-2")
+}
+
+func promptSuggestionPayloadForTurn(text, originTurnID string) *lifecycle.AgentStreamEventPayload {
 	return &lifecycle.AgentStreamEventPayload{
 		TaskID:    "t1",
 		SessionID: "s1",
-		Data:      &lifecycle.AgentStreamEventData{Text: text},
+		Data:      &lifecycle.AgentStreamEventData{Text: text, TurnID: originTurnID},
 	}
 }
 
 // TestHandlePromptSuggestionEvent_PersistsAndPublishes verifies a native
-// suggestion is bound to the latest turn, stored on the session, and published.
+// suggestion from the latest turn is stored on the session under that turn and
+// published.
 func TestHandlePromptSuggestionEvent_PersistsAndPublishes(t *testing.T) {
 	ctx := context.Background()
 	svc, eb := seedPromptSuggestionSession(t, models.TaskSessionStateWaitingForInput)
@@ -122,4 +127,30 @@ func TestHandleAgentCapabilitiesEvent_RecordsNativePromptSuggestions(t *testing.
 	session, err = svc.repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Equal(t, promptSuggestionSourceNone, session.Metadata[promptSuggestionSourceMetadataKey])
+}
+
+// TestHandlePromptSuggestionEvent_RejectsSuggestionWithoutLatestOrigin verifies
+// a suggestion whose originating turn is older than the latest turn, or
+// unknown, is neither stored nor published, and never takes the latest turn.
+func TestHandlePromptSuggestionEvent_RejectsSuggestionWithoutLatestOrigin(t *testing.T) {
+	cases := []struct {
+		name   string
+		origin string
+	}{
+		{name: "older turn", origin: "turn-1"},
+		{name: "unknown origin", origin: ""},
+		{name: "foreign turn", origin: "turn-other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, eb := seedPromptSuggestionSession(t, models.TaskSessionStateWaitingForInput)
+			svc.handlePromptSuggestionEvent(ctx, promptSuggestionPayloadForTurn("delayed", tc.origin))
+
+			session, err := svc.repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			require.NotContains(t, session.Metadata, promptSuggestionMetadataKey)
+			require.Empty(t, eb.events)
+		})
+	}
 }

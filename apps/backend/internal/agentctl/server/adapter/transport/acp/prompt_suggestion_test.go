@@ -74,6 +74,7 @@ func claudeSDKMessage(sessionID, messageType, suggestion string) json.RawMessage
 // prompt_suggestion becomes a prompt_suggestion stream event.
 func TestHandleClaudeSDKMessageEmitsPromptSuggestion(t *testing.T) {
 	a := newPromptSuggestionAdapter(true, true)
+	a.finishPromptTurn(startPromptForSuggestion(a, 1))
 	a.handleClaudeSDKMessage(claudeSDKMessage("session-1", "prompt_suggestion", "  sim, corre os testes  "))
 
 	events := drainEvents(a)
@@ -105,6 +106,7 @@ func TestHandleClaudeSDKMessageIgnoresUnusableMessages(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newPromptSuggestionAdapter(true, tc.enabled)
+			a.finishPromptTurn(startPromptForSuggestion(a, 1))
 			a.handleClaudeSDKMessage(tc.params)
 			if events := drainEvents(a); len(events) != 0 {
 				t.Fatalf("events = %+v, want none", events)

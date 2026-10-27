@@ -103,6 +103,11 @@ suggestions that Claude Code shows, so that I can continue with one key.
 - **AC-UI-PROMPT-SUGGEST-002.5:** Office runs, automation sessions, utility
   calls, and passthrough terminal sessions shall not request native
   suggestions.
+- **AC-UI-PROMPT-SUGGEST-002.6:** The system shall bind each native suggestion
+  to the agent turn that produced it, and shall store it only for that turn.
+  When the originating turn cannot be established, for example because a newer
+  prompt started before the suggestion arrived, the system shall discard the
+  suggestion instead of attributing it to a later turn.
 
 ### REQ-UI-PROMPT-SUGGEST-003: No replacement suggestion
 
@@ -165,6 +170,9 @@ typing.
   behavior on desktop and phone viewports.
 - **AC-UI-PROMPT-SUGGEST-004.9:** The accept control's accessible name shall
   include the suggestion text. All new user-facing copy shall be localized.
+- **AC-UI-PROMPT-SUGGEST-004.10:** Accepting or sending a suggestion shall use
+  exactly the displayed text. Angle brackets, HTML entities, and line breaks
+  shall be kept literally and never interpreted as markup.
 
 ## Out of scope
 

@@ -51,9 +51,10 @@ type sessionMetadataStateGuard interface {
 	) (bool, error)
 }
 
-// handlePromptSuggestionEvent binds a native suggestion to the session's latest
-// turn and publishes it. The write only lands while the session is waiting for
-// input, so a suggestion that loses the race with a newer prompt is dropped.
+// handlePromptSuggestionEvent stores a native suggestion under its originating
+// turn and publishes it, only when that turn is the session's latest. The write
+// only lands while the session is waiting for input, so a suggestion that loses
+// the race with a newer prompt is dropped.
 func (s *Service) handlePromptSuggestionEvent(ctx context.Context, payload *runtimeapi.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil || payload.SessionID == "" {
 		return
@@ -65,9 +66,14 @@ func (s *Service) handlePromptSuggestionEvent(ctx context.Context, payload *runt
 	if text == "" || utf8.RuneCountInString(text) >= maxPromptSuggestionRunes {
 		return
 	}
-	turnID := s.latestSessionTurnID(ctx, payload.SessionID)
+	turnID := payload.Data.TurnID
+	if turnID == "" || turnID != s.latestSessionTurnID(ctx, payload.SessionID) {
+		s.logger.Debug("prompt suggestion is not for the latest turn",
+			zap.String("session_id", payload.SessionID), zap.String("origin_turn_id", turnID))
+		return
+	}
 	guard, ok := s.repo.(sessionMetadataStateGuard)
-	if turnID == "" || !ok {
+	if !ok {
 		return
 	}
 	stored, err := guard.SetSessionMetadataKeyIfState(ctx, payload.SessionID, promptSuggestionMetadataKey,

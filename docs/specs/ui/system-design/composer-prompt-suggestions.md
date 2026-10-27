@@ -42,7 +42,7 @@ Adjacent contracts used, with the change each needs:
 | Requirement | Design section |
 | --- | --- |
 | `REQ-UI-PROMPT-SUGGEST-001` | [Preference](#preference), [Native launch request](#native-launch-request), [Components and responsibilities](#frontend) |
-| `REQ-UI-PROMPT-SUGGEST-002` | [Native launch request](#native-launch-request), [Native delivery](#native-delivery), [Persistence](#persistence) |
+| `REQ-UI-PROMPT-SUGGEST-002` | [Native launch request](#native-launch-request), [Suggestion origin](#suggestion-origin), [Native delivery](#native-delivery), [Persistence](#persistence) |
 | `REQ-UI-PROMPT-SUGGEST-003` | [Composer selection](#composer-selection), [Failure and recovery](#failure-and-recovery) |
 | `REQ-UI-PROMPT-SUGGEST-004` | [Composer selection](#composer-selection), [Rendering and keys](#rendering-and-keys) |
 
@@ -96,8 +96,8 @@ contains this change.
 - **Adapter.** The adapter dispatches `_claude/sdkMessage` and accepts only
   `message.type == "prompt_suggestion"` for the active ACP session. It emits a
   new stream event, `streams.EventTypePromptSuggestion = "prompt_suggestion"`,
-  with `Text`. When a `session/prompt` is in flight, the suggestion belongs to a
-  superseded turn and is dropped (`currentPromptTurn() != nil`).
+  with `Text` and `PromptGeneration`, the lifecycle generation of the
+  originating prompt. See [Suggestion origin](#suggestion-origin).
 
 ### Backend
 
@@ -116,14 +116,18 @@ contains this change.
   through `SetPromptSuggestionsPreference`, wired to
   `user.Service.PromptSuggestionsEnabled`. Both the fresh-launch and the
   recreate paths evaluate it.
+- **Lifecycle.** `handleAgentEventState`, and the durable delivery stream,
+  resolve the event's `PromptGeneration` to its Kandev `TurnID` through the
+  execution's generation map. A suggestion without a generation gets no turn.
 - **Orchestrator.** `event_handlers_streaming.go` dispatches
   `prompt_suggestion` to `handlePromptSuggestionEvent`, which:
   1. Trims the text and rejects an empty value or one of 1,000 characters or
      more. This is a sanity bound; Claude Code already filters native output.
-  2. Resolves the session's latest turn ID.
-  3. Writes `prompt_suggestion = {turn_id, text}` with
-     `SetSessionMetadataKeyIfState(..., WAITING_FOR_INPUT)`, so a suggestion
-     that races a newer prompt is lost.
+  2. Rejects the suggestion when its originating `TurnID` is empty or is not
+     the session's latest turn. It never substitutes the latest turn.
+  3. Writes `prompt_suggestion = {turn_id, text}` with the originating turn ID
+     through `SetSessionMetadataKeyIfState(..., WAITING_FOR_INPUT)`, so a
+     suggestion that races a newer prompt is lost.
   4. Publishes `session.prompt_suggestion` (`events.SessionPromptSuggestion`)
      with `{task_id, session_id, turn_id, text}` through the existing session
      notification bridge.
@@ -181,6 +185,34 @@ A session counts as native only when it negotiated native suggestions. A Claude
 Code session started while the preference was off is not native, and shows no
 suggestion until it restarts or resumes with the preference on.
 
+### Suggestion origin
+
+Claude Code's `prompt_suggestion` message carries `type`, `suggestion`, its own
+`uuid`, and `session_id`, but no reference to the turn it predicts. Origin is
+therefore established by the adapter, from the ACP prompt boundaries:
+
+- When a prompt finishes, the adapter opens a suggestion window for that
+  prompt's generation.
+- A window closes when a suggestion arrives or when the next prompt starts.
+- A prompt that starts while the previous window is still open overlaps it:
+  a delayed suggestion from the earlier prompt could arrive after this one
+  finishes. Its own window therefore has no trustworthy origin.
+- A suggestion that arrives while a prompt is in flight is dropped.
+- A suggestion that arrives while idle takes the open window's generation. It
+  is dropped when no window is open, when the window has no trustworthy origin,
+  or when the generation is unknown (`0`).
+
+Two provider facts keep this precise rather than lossy. The SDK delivers every
+notification read before a `session/prompt` response before that response, and
+the handler runs inside that delivery, so a suggestion emitted before the
+response is always seen while the prompt is still in flight. Claude Code
+(`claude-agent-acp` 0.81.2) also cancels a pending suggestion when the next
+prompt arrives: in a probe, a prompt sent immediately after a turn result
+received no suggestion for the earlier turn, during or after the new turn. The
+overlap rule keeps a delayed suggestion out even if a future adapter stops
+cancelling. Its cost is that a turn that follows a silent turn, or a reply sent
+within about two seconds, shows no suggestion.
+
 ### Native delivery
 
 WebSocket event `session.prompt_suggestion`:
@@ -201,10 +233,11 @@ WebSocket event `session.prompt_suggestion`:
 3. Claude Code forks the conversation and emits `prompt_suggestion`, measured
    at about 1.7 seconds after the result. The adapter forwards
    `_claude/sdkMessage`.
-4. agentctl drops the suggestion if a newer prompt was sent. Otherwise it emits
-   the `prompt_suggestion` stream event.
-5. The orchestrator writes the metadata (state-guarded) and publishes
-   `session.prompt_suggestion`.
+4. agentctl drops the suggestion if a newer prompt is in flight or its origin is
+   not trustworthy. Otherwise it emits the `prompt_suggestion` stream event with
+   the originating prompt generation, which the lifecycle resolves to a turn ID.
+5. The orchestrator checks that the originating turn is the latest, writes the
+   metadata (state-guarded), and publishes `session.prompt_suggestion`.
 6. The frontend stores `{ turnId, text, source: "native" }`. The composer shows
    it when the turn key matches and the draft is empty.
 
@@ -237,8 +270,9 @@ Dismissals are kept in the browser by session and turn ID.
 | Suggestion, non-empty draft | Draft | Hidden | Existing | Existing | Existing |
 | No suggestion, or menu open | Existing | Hidden | Existing | Existing | Existing |
 
-- **Accept** calls the editor handle's `setValue(text)` with the caret at the
-  end. The draft persists through the normal `onUpdate` path.
+- **Accept** replaces the draft with the suggestion as literal text
+  (`textToHtml` escapes markup and keeps line breaks as paragraphs), with the
+  caret at the end. The draft persists through the normal `onUpdate` path.
 - **Send** calls the same submit path as `handleSubmitWithReset` with the
   suggestion as the message. Queueing, attachments, and plan mode behave as if
   the user had typed the text.
@@ -258,9 +292,11 @@ Dismissals are kept in the browser by session and turn ID.
   missing `_meta` handling or an older pinned version. The adapter version is
   pinned (0.81.2 verified), so this is a regression signal.
 - **Suggestion payload on a non-native session.** The composer ignores it.
-- **Notification ordering.** A suggestion arriving after a newer prompt is
-  dropped by agentctl (step 4). A suggestion that loses the race to a state
-  change is dropped by the state-guarded write (step 5).
+- **Notification ordering.** A suggestion arriving during a newer prompt is
+  dropped by agentctl, and one whose origin overlaps a newer prompt is dropped
+  by the origin window (step 4). A suggestion whose originating turn is no
+  longer the latest is rejected by the orchestrator, and one that loses the
+  race to a state change is dropped by the state-guarded write (step 5).
 - **Backend restart.** The metadata survives. The frontend still shows the
   suggestion only while its turn is the latest.
 - **Storage errors.** These are treated as no dismissal.

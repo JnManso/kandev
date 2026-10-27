@@ -61,8 +61,8 @@ type claudeSDKMessageParams struct {
 }
 
 // handleClaudeSDKMessage turns a forwarded prompt_suggestion into a stream
-// event. A suggestion is only valid for the turn that just completed, so it is
-// dropped when another prompt is already in flight or the session changed.
+// event bound to its originating prompt generation. It is dropped for another
+// session, or when its originating turn cannot be established.
 func (a *Adapter) handleClaudeSDKMessage(params json.RawMessage) {
 	if !a.nativePromptSuggestions() {
 		return
@@ -81,9 +81,80 @@ func (a *Adapter) handleClaudeSDKMessage(params json.RawMessage) {
 	if sessionID == "" || msg.SessionID != sessionID {
 		return
 	}
-	if a.currentPromptTurn() != nil {
-		a.logger.Debug("dropping prompt suggestion for a superseded turn", zap.String("session_id", sessionID))
+	generation := a.claimPromptSuggestionOrigin()
+	if generation == 0 {
+		a.logger.Debug("dropping prompt suggestion without a trustworthy originating turn",
+			zap.String("session_id", sessionID))
 		return
 	}
-	a.sendUpdate(AgentEvent{Type: streams.EventTypePromptSuggestion, SessionID: sessionID, Text: text})
+	a.sendUpdate(AgentEvent{
+		Type:             streams.EventTypePromptSuggestion,
+		SessionID:        sessionID,
+		Text:             text,
+		PromptGeneration: generation,
+	})
+}
+
+// promptSuggestionTurn records whether a prompt was sent while an earlier
+// prompt's suggestion could still arrive.
+type promptSuggestionTurn struct {
+	sent     bool
+	overlaps bool
+}
+
+// promptSuggestionOrigin is the suggestion window of the most recently
+// finished prompt. Claude Code's prompt_suggestion carries no turn reference,
+// so a suggestion is attributed to the finished prompt whose window is open,
+// and only when no other prompt could have produced it.
+type promptSuggestionOrigin struct {
+	open       bool
+	generation uint64 // 0 when the finished prompt's origin is not trustworthy
+}
+
+// markPromptSentForSuggestion closes the previous prompt's window. A prompt
+// sent while that window is still open overlaps it: a delayed suggestion from
+// the earlier prompt could arrive after this one finishes.
+func (a *Adapter) markPromptSentForSuggestion(turn *promptTurnState) {
+	if turn == nil {
+		return
+	}
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	turn.suggestion = promptSuggestionTurn{sent: true, overlaps: a.suggestionOrigin.open}
+	a.suggestionOrigin = promptSuggestionOrigin{}
+}
+
+// recordPromptFinishedForSuggestionLocked opens the finished prompt's window.
+// A predecessor that finishes while a successor is in flight makes the
+// successor's origin ambiguous instead. Callers hold promptTurnMu.
+func (a *Adapter) recordPromptFinishedForSuggestionLocked(turn *promptTurnState) {
+	if turn == nil || !turn.suggestion.sent {
+		return
+	}
+	if a.promptTurn != turn {
+		if a.promptTurn != nil {
+			a.promptTurn.suggestion.overlaps = true
+		}
+		return
+	}
+	generation := turn.promptGeneration
+	if turn.suggestion.overlaps {
+		generation = 0
+	}
+	a.suggestionOrigin = promptSuggestionOrigin{open: true, generation: generation}
+}
+
+// claimPromptSuggestionOrigin returns the originating prompt generation for a
+// suggestion arriving now, or 0 when it has none: a prompt is in flight, no
+// window is open, or the window's origin is not trustworthy. A window yields at
+// most one suggestion.
+func (a *Adapter) claimPromptSuggestionOrigin() uint64 {
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	if a.promptTurn != nil || !a.suggestionOrigin.open {
+		return 0
+	}
+	generation := a.suggestionOrigin.generation
+	a.suggestionOrigin = promptSuggestionOrigin{}
+	return generation
 }

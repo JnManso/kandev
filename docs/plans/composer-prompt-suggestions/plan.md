@@ -89,6 +89,7 @@ Task 04 removed the fallback.
 | 2 | [Task 02: Native Claude suggestion delivery](task-02-native-suggestion-delivery.md) | 2 | 01 |
 | 3 | [Task 03: Composer suggestion UI](task-03-composer-prompt-suggestion.md) | 3 | 01, 02 |
 | 4 | [Task 04: Native-only scope](task-04-native-only-scope.md) | 4 | 03 |
+| 5 | [Task 05: Review fixes](task-05-review-fixes.md) | 5 | 04 |
 
 The order is strictly sequential. Task 02's launch path reads the preference
 that Task 01 adds. Task 03 consumes both the preference and the native event.
@@ -99,6 +100,7 @@ Task 01, because it is in another repository.
 - [x] Task 02
 - [x] Task 03
 - [x] Task 04
+- [x] Task 05
 
 ## Technical approach
 

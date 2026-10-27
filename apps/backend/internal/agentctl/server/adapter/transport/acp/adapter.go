@@ -339,6 +339,8 @@ type Adapter struct {
 	// and wait for acknowledgment before reporting success.
 	promptTurnMu sync.Mutex
 	promptTurn   *promptTurnState
+	// suggestionOrigin is guarded by promptTurnMu.
+	suggestionOrigin promptSuggestionOrigin
 
 	// promptGate is a 1-slot ownership token for session/prompt calls. Calls are
 	// serialized by default so ScheduleWakeup cannot race a user prompt and
@@ -402,6 +404,8 @@ type promptTurnState struct {
 	handedOff                    bool
 	gateOwned                    bool
 	finishing                    bool
+	// suggestion is guarded by the adapter's promptTurnMu.
+	suggestion promptSuggestionTurn
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
