@@ -96,7 +96,7 @@ The `kdlbs/acp-go-sdk` fork change inside Task 02 can start in parallel with
 Task 01, because it is in another repository.
 
 - [x] Task 01
-- [x] Task 02 (waiting on kdlbs/acp-go-sdk#6; `go.mod` uses the JnManso fork until it merges)
+- [x] Task 02
 - [x] Task 03
 - [x] Task 04
 

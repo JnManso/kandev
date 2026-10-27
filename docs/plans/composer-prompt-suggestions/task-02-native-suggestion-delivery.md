@@ -1,7 +1,7 @@
 ---
 id: "02-native-suggestion-delivery"
 title: "Deliver native Claude prompt suggestions"
-status: in_progress
+status: done
 wave: 2
 depends_on:
   - "01-suggestion-agent-and-preference"
@@ -161,12 +161,11 @@ Use `/acp-debug` for the manual adapter probe.
 
 ## Results
 
-Implemented in this repository. The SDK change (`2259551`) is published on
-`JnManso/acp-go-sdk` branch `feat/client-extension-notifications` and proposed
-upstream in kdlbs/acp-go-sdk#6. Until that merges, `go.mod` replaces the SDK with
-`github.com/JnManso/acp-go-sdk v0.13.6-0.20261006200825-2259551ab03d`. After it
-merges, the `replace` must move back to a `kdlbs/acp-go-sdk` pseudo version; that
-bump is what remains before this work order is done.
+Implemented in this repository. The SDK change merged as kdlbs/acp-go-sdk#6
+(`48a57e4`), and `go.mod` replaces the SDK with
+`github.com/kdlbs/acp-go-sdk v0.13.6-0.20261026214240-48a57e4292e8`. Its Go
+sources are identical to the `JnManso/acp-go-sdk` commit (`2259551`) that the
+branch used while #6 was under review.
 
 Deviations from the original package, now reflected in the system design:
 

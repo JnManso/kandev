@@ -64,8 +64,8 @@ add targeted coverage for unsupported agents and stale suggestions.
 
 ## Out of scope
 
-- Replacing the `replace` directive for `github.com/coder/acp-go-sdk`. It still
-  needs kdlbs/acp-go-sdk#6 to merge, see [Task 02](task-02-native-suggestion-delivery.md).
+- Replacing the `replace` directive for `github.com/coder/acp-go-sdk`. It waited
+  on kdlbs/acp-go-sdk#6 and is tracked in [Task 02](task-02-native-suggestion-delivery.md).
 - Native sources other than Claude Code.
 
 ## Acceptance
@@ -172,5 +172,5 @@ Manual test on 2026-10-13 in a secondary instance: a Claude session showed the
 native suggestion; OpenCode with a Claude model and the custom Atomica Code ACP
 agent kept the normal composer with no suggestion.
 
-The `go.mod` `replace` still points at `JnManso/acp-go-sdk` until
-kdlbs/acp-go-sdk#6 merges.
+After kdlbs/acp-go-sdk#6 merged, the `go.mod` `replace` moved to
+`kdlbs/acp-go-sdk` (see Task 02).
