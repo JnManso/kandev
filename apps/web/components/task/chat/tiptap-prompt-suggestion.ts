@@ -1,4 +1,5 @@
 import { Extension, type Editor } from "@tiptap/core";
+import { textToHtml } from "./tiptap-helpers";
 
 type PromptSuggestionStorage = { promptSuggestion?: { text: string } };
 
@@ -40,11 +41,11 @@ export function updatePromptSuggestion(editor: Editor | null, text: string | nul
   editor.view.dispatch(editor.state.tr);
 }
 
-/** Tab: copy the visible suggestion into the draft as editable text. */
+/** Tab: copy the visible suggestion into the draft as editable literal text. */
 export function acceptPromptSuggestion(editor: Editor): boolean {
   const text = visiblePromptSuggestion(editor);
   if (!text) return false;
-  editor.chain().setContent(text, { emitUpdate: true }).focus("end").run();
+  editor.chain().setContent(textToHtml(text), { emitUpdate: true }).focus("end").run();
   return true;
 }
 
@@ -52,7 +53,7 @@ export function acceptPromptSuggestion(editor: Editor): boolean {
 export function fillPromptSuggestionForSubmit(editor: Editor): boolean {
   const text = visiblePromptSuggestion(editor);
   if (!text) return false;
-  editor.commands.setContent(text, { emitUpdate: true });
+  editor.commands.setContent(textToHtml(text), { emitUpdate: true });
   return true;
 }
 

@@ -12,6 +12,7 @@ import {
   updatePromptSuggestion,
   visiblePromptSuggestion,
 } from "./tiptap-prompt-suggestion";
+import { getMarkdownText } from "./tiptap-helpers";
 
 const RUN_TESTS = "sim, corre os testes";
 
@@ -105,5 +106,28 @@ describe("accepting a suggestion", () => {
     e.setEditable(false);
     expect(acceptPromptSuggestion(e)).toBe(false);
     expect(fillPromptSuggestionForSubmit(e)).toBe(false);
+  });
+});
+
+// @covers AC-UI-PROMPT-SUGGEST-004.10
+describe("prompt suggestion literal text", () => {
+  const literalCases: Array<[string, string]> = [
+    ["angle brackets and entities", "Fix the <button> label and preserve &lt;name&gt;"],
+    ["ampersands and comparisons", "check a & b < c > d"],
+    ["line breaks", "run the tests\nthen commit"],
+  ];
+
+  it.each(literalCases)("accept keeps %s exactly as displayed", (_name, text) => {
+    const e = makeEditor();
+    updatePromptSuggestion(e, text);
+    expect(acceptPromptSuggestion(e)).toBe(true);
+    expect(getMarkdownText(e)).toBe(text);
+  });
+
+  it.each(literalCases)("submit keeps %s exactly as displayed", (_name, text) => {
+    const e = makeEditor();
+    updatePromptSuggestion(e, text);
+    expect(fillPromptSuggestionForSubmit(e)).toBe(true);
+    expect(getMarkdownText(e)).toBe(text);
   });
 });
