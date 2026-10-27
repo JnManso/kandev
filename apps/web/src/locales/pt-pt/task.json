@@ -861,7 +861,7 @@
   "keySlash": "Barra",
   "keyTab": "Tab",
   "promptSuggestionAccept": "Aceitar",
-  "promptSuggestionEnterSends": "Enter envia",
+  "promptSuggestionShortcutSends": "{{shortcut}} envia",
   "promptSuggestionUseReply": "Usar resposta",
   "promptSuggestionAcceptAria": "Usar a resposta sugerida: {{suggestion}}",
   "keyTilde": "Til",

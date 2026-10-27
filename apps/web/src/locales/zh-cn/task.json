@@ -860,7 +860,7 @@
   "keySlash": "斜杠",
   "keyTab": "Tab",
   "promptSuggestionAccept": "接受",
-  "promptSuggestionEnterSends": "按 Enter 发送",
+  "promptSuggestionShortcutSends": "{{shortcut}} 发送",
   "promptSuggestionUseReply": "使用回复",
   "promptSuggestionAcceptAria": "使用建议的回复：{{suggestion}}",
   "keyTilde": "波浪号",

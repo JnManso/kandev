@@ -279,7 +279,8 @@ Dismissals are kept in the browser by session and turn ID.
 - **Escape** is claimed through the existing suggestion-escape claim path, so
   the Quick Chat dialog stays open.
 - **Styling.** Ghost text uses the muted foreground and wraps on phones.
-- **Hint chip.** It shows a `Tab` keycap on fine pointers. On coarse pointers it
+- **Hint chip.** It shows a `Tab` keycap and the user's configured submit
+  shortcut (Enter, or Cmd/Ctrl+Enter) on fine pointers. On coarse pointers it
   is a button at least 44 px tall, labelled "Use reply". Its `aria-label`
   contains the suggestion.
 

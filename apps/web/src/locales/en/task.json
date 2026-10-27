@@ -908,7 +908,7 @@
   "keySlash": "Slash",
   "keyTab": "Tab",
   "promptSuggestionAccept": "Accept",
-  "promptSuggestionEnterSends": "Enter sends",
+  "promptSuggestionShortcutSends": "{{shortcut}} sends",
   "promptSuggestionUseReply": "Use reply",
   "promptSuggestionAcceptAria": "Use suggested reply: {{suggestion}}",
   "keyTilde": "Tilde",

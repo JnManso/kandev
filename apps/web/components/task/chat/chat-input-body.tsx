@@ -244,6 +244,7 @@ function ChatInputEditorField({
       {promptSuggestion && !value.trim() && !isDisabled && (
         <ComposerPromptSuggestionHint
           suggestion={promptSuggestion}
+          submitKey={p.submitKey}
           onAccept={() => inputRef.current?.acceptPromptSuggestion()}
         />
       )}

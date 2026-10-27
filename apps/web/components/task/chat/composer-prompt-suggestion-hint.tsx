@@ -2,10 +2,14 @@
 
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { detectPlatform, formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
 
 type ComposerPromptSuggestionHintProps = {
   suggestion: string;
+  /** The user's configured submit key, which also sends the suggestion. */
+  submitKey: "enter" | "cmd_enter";
   onAccept: () => void;
 };
 
@@ -13,10 +17,15 @@ type ComposerPromptSuggestionHintProps = {
  *  fine pointers, a 44px "Use reply" button on touch. */
 export function ComposerPromptSuggestionHint({
   suggestion,
+  submitKey,
   onAccept,
 }: ComposerPromptSuggestionHintProps) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
+  const submitShortcut = formatShortcut(
+    submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT,
+    detectPlatform(),
+  );
   return (
     <button
       type="button"
@@ -38,7 +47,7 @@ export function ComposerPromptSuggestionHint({
           </kbd>
           <span>{t("task:promptSuggestionAccept")}</span>
           <span aria-hidden="true">·</span>
-          <span>{t("task:promptSuggestionEnterSends")}</span>
+          <span>{t("task:promptSuggestionShortcutSends", { shortcut: submitShortcut })}</span>
         </>
       ) : (
         <span>{t("task:promptSuggestionUseReply")}</span>

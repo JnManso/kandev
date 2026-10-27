@@ -120,6 +120,11 @@ Implemented.
 - **Orchestrator.** `handlePromptSuggestionEvent` stores and publishes the
   suggestion under its originating turn only when that turn is the latest.
 - **Composer.** Accept and submit insert the suggestion through `textToHtml`.
+- **Hint.** An automated review (Greptile) found that the desktop hint always
+  said "Enter sends", while the default submit key is Cmd/Ctrl+Enter. The hint
+  now names the configured shortcut, and the settings help says "your send
+  shortcut". `composer-prompt-suggestion-hint.test.tsx` failed (`Enter sends`
+  without `Ctrl+Enter`) before the change.
 
 Red-Green evidence:
 
