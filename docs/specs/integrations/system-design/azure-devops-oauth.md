@@ -203,6 +203,10 @@ expiring.
 
 Renewal is shared by REST, the health poller, and clone credentials, so
 concurrent consumers produce at most one token request per workspace.
+Sign-in completion, sign-out, and credential removal take the same lock, so a
+renewal that started for a replaced credential cannot write its tokens back.
+Sign-in snapshots the previous Microsoft tokens and restores them if any later
+write fails, keeping the existing connection usable.
 
 ## Clone credentials
 
@@ -286,7 +290,7 @@ Secret keys, owned by `azuredevops`:
 
 - `lib/types/azure-devops.ts`: widen `AzureDevOpsAuthMethod`; add the response
   fields above.
-- `components/azure-devops/use-azure-devops-oauth-connect.ts`: modeled on
+- `hooks/domains/azure-devops/use-azure-devops-oauth-connect.ts`: modeled on
   `components/jira/use-jira-oauth-connect.ts`; validates `event.origin`,
   `event.source === popup`, and the pending state; shows the inline paste panel
   as soon as the popup opens, and reports a blocked popup. While a sign-in is
@@ -294,6 +298,13 @@ Secret keys, owned by `azuredevops`:
   so an operator redirect URL without the callback path completes without
   pasting. The first result clears the pending state, so the callback message
   and the address watch never complete twice.
+- Progress (opening sign-in, completing, signing out) is announced in one
+  translated `role="status"` region; action labels stay stable. Controls use
+  `controlSizingClassName("standard")` (28px desktop, 44px on phones and coarse
+  pointers). One completion runs at a time, and the redirect watch stops when
+  the popup closes while the paste panel stays available.
+- `hooks/domains/azure-devops/use-azure-devops-oauth.ts`: installation default
+  client ID and sign-out.
 - `components/azure-devops/azure-devops-settings-form.ts`: method-aware pure
   form helpers (`requestFromForm`, `canSubmitForm`, `signedInWithMicrosoft`).
 - `lib/api/domains/azure-devops-oauth-api.ts`: availability, start, complete.

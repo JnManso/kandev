@@ -26,7 +26,11 @@ type fakeEntra struct {
 	refreshTokens []string
 	clientIDs     []string
 	redirects     []string
-	issued        int
+	// refreshEntered and refreshRelease, when set, pause Refresh after it is
+	// called and before it issues tokens.
+	refreshEntered chan struct{}
+	refreshRelease chan struct{}
+	issued         int
 }
 
 func (f *fakeEntra) DiscoverTenant(context.Context, string) (string, error) {
@@ -56,6 +60,10 @@ func (f *fakeEntra) ExchangeCode(_ context.Context, _, clientID, code, redirect,
 }
 
 func (f *fakeEntra) Refresh(_ context.Context, _, clientID, refreshToken string) (*entraToken, error) {
+	if f.refreshRelease != nil {
+		f.refreshEntered <- struct{}{}
+		<-f.refreshRelease
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refreshTokens = append(f.refreshTokens, refreshToken)

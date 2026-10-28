@@ -9,6 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -22,7 +23,7 @@ import type {
 import {
   useAzureDevOpsOAuthConnect,
   type AzureDevOpsOAuthConnect,
-} from "./use-azure-devops-oauth-connect";
+} from "@/hooks/domains/azure-devops/use-azure-devops-oauth-connect";
 
 export function AzureDevOpsAuthMethodField({
   value,
@@ -94,7 +95,7 @@ function OAuthClientIdField({
         disabled={disabled}
         autoComplete="off"
         spellCheck={false}
-        className="h-11 font-mono sm:h-8"
+        className={controlSizingClassName("standard", "font-mono")}
         data-testid="azure-devops-oauth-client-id"
       />
       <p
@@ -132,7 +133,7 @@ function OAuthPastePanel({ oauth }: { oauth: AzureDevOpsOAuthConnect }) {
           disabled={oauth.completing}
           aria-label={t("azuredevops:oauthPasteTitle")}
           autoComplete="off"
-          className="min-w-0"
+          className={controlSizingClassName("standard", "min-w-0")}
           data-testid="azure-devops-oauth-paste-url"
         />
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -140,18 +141,16 @@ function OAuthPastePanel({ oauth }: { oauth: AzureDevOpsOAuthConnect }) {
             type="button"
             onClick={oauth.completeFromPaste}
             disabled={oauth.completing || !oauth.pasteUrl}
-            className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+            className={controlSizingClassName("standard", "w-full cursor-pointer sm:w-auto")}
             data-testid="azure-devops-oauth-paste-complete"
           >
-            {oauth.completing
-              ? t("azuredevops:oauthCompleting")
-              : t("azuredevops:oauthPasteComplete")}
+            {t("azuredevops:oauthPasteComplete")}
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={oauth.cancel}
-            className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+            className={controlSizingClassName("standard", "w-full cursor-pointer sm:w-auto")}
             data-testid="azure-devops-oauth-paste-cancel"
           >
             {t("common:cancel")}
@@ -207,13 +206,23 @@ function OAuthStatus({
 
 function signInLabel(
   t: (key: string) => string,
-  oauth: AzureDevOpsOAuthConnect,
   signedIn: boolean,
   config: AzureDevOpsConfig | null,
 ): string {
-  if (oauth.connecting) return t("azuredevops:oauthSigningIn");
   if (signedIn && !config?.reauthRequired) return t("azuredevops:oauthSignInAgain");
   return t("azuredevops:oauthSignIn");
+}
+
+/** Localized progress for the polite status region; empty when idle. */
+function progressText(
+  t: (key: string) => string,
+  oauth: AzureDevOpsOAuthConnect,
+  signingOut: boolean,
+): string {
+  if (oauth.connecting) return t("azuredevops:oauthSigningIn");
+  if (oauth.completing) return t("azuredevops:oauthCompleting");
+  if (signingOut) return t("azuredevops:oauthSigningOut");
+  return "";
 }
 
 function OAuthActions({
@@ -241,12 +250,12 @@ function OAuthActions({
         type="button"
         variant={secondary ? "outline" : "default"}
         onClick={oauth.connect}
-        disabled={!canSignIn || oauth.connecting}
-        className="h-11 w-full shrink-0 cursor-pointer sm:h-8 sm:w-auto"
+        disabled={!canSignIn || oauth.connecting || oauth.completing}
+        className={controlSizingClassName("standard", "w-full shrink-0 cursor-pointer sm:w-auto")}
         data-testid="azure-devops-oauth-connect"
       >
         <IconBrandWindows className="h-4 w-4" />
-        {signInLabel(t, oauth, signedIn, config)}
+        {signInLabel(t, signedIn, config)}
       </Button>
       {signedIn && (
         <Button
@@ -254,11 +263,11 @@ function OAuthActions({
           variant="ghost"
           onClick={onSignOut}
           disabled={disabled || signingOut || oauth.connecting}
-          className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+          className={controlSizingClassName("standard", "w-full cursor-pointer sm:w-auto")}
           data-testid="azure-devops-oauth-sign-out"
         >
           <IconLogout className="h-4 w-4" />
-          {signingOut ? t("azuredevops:oauthSigningOut") : t("azuredevops:oauthSignOut")}
+          {t("azuredevops:oauthSignOut")}
         </Button>
       )}
     </div>
@@ -293,10 +302,14 @@ export function AzureDevOpsOAuthFields({
   disabled: boolean;
   onConnected: (config: AzureDevOpsConfig) => void;
 }) {
+  const { t } = useTranslation();
   const oauth = useAzureDevOpsOAuthConnect(workspaceId, request, onConnected);
   const hasApplication = !!(clientId.trim() || defaultClientId);
   return (
     <div className="space-y-3 rounded-md border p-3 sm:col-span-2" data-testid="azure-devops-oauth">
+      <span role="status" className="sr-only" data-testid="azure-devops-oauth-progress">
+        {progressText(t, oauth, signingOut)}
+      </span>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <OAuthStatus config={config} signedIn={signedIn} />
         <OAuthActions

@@ -15,6 +15,8 @@ type fakeSecretStore struct {
 	values         map[string]string
 	setFailures    int
 	deleteFailures int
+	// failSetKeys fails the next Set of each listed secret ID once.
+	failSetKeys map[string]bool
 }
 
 func newFakeSecretStore() *fakeSecretStore {
@@ -36,6 +38,10 @@ func (f *fakeSecretStore) Set(_ context.Context, id, _ string, value string) err
 	defer f.mu.Unlock()
 	if f.setFailures > 0 {
 		f.setFailures--
+		return errors.New("injected secret set failure")
+	}
+	if f.failSetKeys[id] {
+		delete(f.failSetKeys, id)
 		return errors.New("injected secret set failure")
 	}
 	f.values[id] = value

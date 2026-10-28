@@ -2,6 +2,7 @@ package azuredevops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -35,6 +36,8 @@ func requireSignedInOrganization(previous *Config, organizationURL string) error
 // projection after another credential replaced them. Readers follow
 // auth_method, so a leftover token is never used; failures are only logged.
 func (s *Service) discardOAuthCredential(ctx context.Context, workspaceID string) {
+	unlock := s.oauthLocks.lock(workspaceID)
+	defer unlock()
 	if s.secrets != nil {
 		for _, key := range []string{OAuthRefreshTokenKey(workspaceID), OAuthAccessTokenKey(workspaceID)} {
 			if exists, err := s.secrets.Exists(ctx, key); err != nil || !exists {
@@ -131,4 +134,44 @@ func (s *Service) SignOutOAuth(ctx context.Context, workspaceID string) (*Config
 	}
 	s.log.Info("azure devops oauth signed_out", zap.String("workspace_id", workspaceID))
 	return s.GetConfigForWorkspace(ctx, workspaceID)
+}
+
+// oauthTokenSnapshot holds a workspace's Microsoft tokens before a replacement.
+type oauthTokenSnapshot struct {
+	values map[string]string
+}
+
+func (s *Service) snapshotOAuthTokens(ctx context.Context, workspaceID string) (oauthTokenSnapshot, error) {
+	snapshot := oauthTokenSnapshot{values: map[string]string{}}
+	for _, key := range []string{OAuthRefreshTokenKey(workspaceID), OAuthAccessTokenKey(workspaceID)} {
+		exists, err := s.secrets.Exists(ctx, key)
+		if err != nil {
+			return snapshot, fmt.Errorf("check microsoft token: %w", err)
+		}
+		if !exists {
+			continue
+		}
+		value, err := s.secrets.Reveal(ctx, key)
+		if err != nil {
+			return snapshot, fmt.Errorf("read microsoft token: %w", err)
+		}
+		snapshot.values[key] = value
+	}
+	return snapshot, nil
+}
+
+// restoreOAuthTokens puts back the tokens captured before a failed
+// replacement and removes tokens that did not exist before.
+func (s *Service) restoreOAuthTokens(ctx context.Context, workspaceID string, snapshot oauthTokenSnapshot) error {
+	var result error
+	for _, key := range []string{OAuthRefreshTokenKey(workspaceID), OAuthAccessTokenKey(workspaceID)} {
+		if value, ok := snapshot.values[key]; ok {
+			result = errors.Join(result, s.secrets.Set(ctx, key, "Azure DevOps Microsoft token", value))
+			continue
+		}
+		if exists, err := s.secrets.Exists(ctx, key); err == nil && exists {
+			result = errors.Join(result, s.secrets.Delete(ctx, key))
+		}
+	}
+	return result
 }

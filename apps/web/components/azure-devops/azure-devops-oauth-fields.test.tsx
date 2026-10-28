@@ -5,7 +5,7 @@ import { activateLocale } from "@/lib/i18n";
 import type { AzureDevOpsConfig } from "@/lib/types/azure-devops";
 
 import { AzureDevOpsOAuthFields } from "./azure-devops-oauth-fields";
-import { parseOAuthRedirect } from "./use-azure-devops-oauth-connect";
+import { parseOAuthRedirect } from "@/hooks/domains/azure-devops/use-azure-devops-oauth-connect";
 
 const api = vi.hoisted(() => ({ start: vi.fn(), complete: vi.fn() }));
 const toast = vi.hoisted(() => vi.fn());
@@ -31,6 +31,7 @@ const CONNECTED: AzureDevOpsConfig = {
 };
 const AZURE_CLI_CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 const CONNECT_TEST_ID = "azure-devops-oauth-connect";
+const PASTE_TEST_ID = "azure-devops-oauth-paste";
 const DEFAULT_CLIENT_ID = "11111111-1111-1111-1111-111111111111";
 
 beforeAll(async () => {
@@ -69,7 +70,7 @@ function renderFields(props: Partial<Parameters<typeof AzureDevOpsOAuthFields>[0
 
 async function startSignIn() {
   api.start.mockResolvedValue({ authUrl: "https://login.example/authorize?state=s1", state: "s1" });
-  const popup = { location: { assign: vi.fn() }, close: vi.fn() };
+  const popup = { location: { assign: vi.fn() }, close: vi.fn(), closed: false };
   vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
   fireEvent.click(screen.getByTestId(CONNECT_TEST_ID));
   await waitFor(() => expect(popup.location.assign).toHaveBeenCalled());
@@ -98,7 +99,7 @@ describe("AzureDevOpsOAuthFields", () => {
     const popup = await startSignIn();
     expect(api.start).toHaveBeenCalledWith("ws-1", REQUEST);
     expect(popup.location.assign).toHaveBeenCalledWith("https://login.example/authorize?state=s1");
-    expect(screen.getByTestId("azure-devops-oauth-paste")).toBeTruthy();
+    expect(screen.getByTestId(PASTE_TEST_ID)).toBeTruthy();
 
     postFromPopup(popup, { code: "code-1", state: "s1" });
 
@@ -106,7 +107,7 @@ describe("AzureDevOpsOAuthFields", () => {
       expect(api.complete).toHaveBeenCalledWith("ws-1", { code: "code-1", state: "s1" }),
     );
     await waitFor(() => expect(onConnected).toHaveBeenCalledWith(CONNECTED));
-    expect(screen.queryByTestId("azure-devops-oauth-paste")).toBeNull();
+    expect(screen.queryByTestId(PASTE_TEST_ID)).toBeNull();
   });
 
   it("ignores messages from another origin, another window, or another attempt", async () => {
@@ -130,7 +131,7 @@ describe("AzureDevOpsOAuthFields", () => {
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(api.complete).not.toHaveBeenCalled();
     expect(popup.close).toHaveBeenCalled();
-    expect(screen.queryByTestId("azure-devops-oauth-paste")).toBeNull();
+    expect(screen.queryByTestId(PASTE_TEST_ID)).toBeNull();
   });
 
   it("completes from a pasted redirect address and rejects incomplete ones", async () => {
@@ -263,6 +264,61 @@ describe("AzureDevOpsOAuthFields sign-out", () => {
     expect((screen.getByTestId("azure-devops-oauth-sign-out") as HTMLButtonElement).disabled).toBe(
       true,
     );
+  });
+});
+
+describe("AzureDevOpsOAuthFields completion guards", () => {
+  it("completes once when the pasted address and the popup report the same result", async () => {
+    let finish: (value: AzureDevOpsConfig) => void = () => undefined;
+    api.complete.mockImplementation(
+      () => new Promise<AzureDevOpsConfig>((resolve) => (finish = resolve)),
+    );
+    renderFields();
+    const popup = await startSignIn();
+    fireEvent.change(screen.getByTestId("azure-devops-oauth-paste-url"), {
+      target: { value: "http://localhost/cb?code=code-1&state=s1" },
+    });
+    fireEvent.click(screen.getByTestId("azure-devops-oauth-paste-complete"));
+    await waitFor(() => expect(api.complete).toHaveBeenCalledTimes(1));
+    expect((screen.getByTestId(CONNECT_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+
+    const location = popup.location as unknown as { origin: string; search: string };
+    location.origin = window.location.origin;
+    location.search = "?code=code-1&state=s1";
+    postFromPopup(popup, { code: "code-1", state: "s1" });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(api.complete).toHaveBeenCalledTimes(1);
+    finish(CONNECTED);
+  });
+
+  it("stops watching a closed popup and keeps the paste fallback", async () => {
+    renderFields();
+    const popup = await startSignIn();
+    popup.closed = true;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const location = popup.location as unknown as { origin: string; search: string };
+    location.origin = window.location.origin;
+    location.search = "?code=late&state=s1";
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(api.complete).not.toHaveBeenCalled();
+    expect(screen.getByTestId(PASTE_TEST_ID)).toBeTruthy();
+  });
+
+  it("announces progress without renaming the action", async () => {
+    let started: (value: { authUrl: string; state: string }) => void = () => undefined;
+    api.start.mockImplementation(() => new Promise((resolve) => (started = resolve)));
+    vi.spyOn(window, "open").mockReturnValue({
+      location: { assign: vi.fn() },
+      close: vi.fn(),
+      closed: false,
+    } as unknown as Window);
+    renderFields();
+    const connect = screen.getByTestId(CONNECT_TEST_ID);
+    const label = connect.textContent;
+    fireEvent.click(connect);
+    await waitFor(() => expect(screen.getByRole("status").textContent).not.toBe(""));
+    expect(connect.textContent).toBe(label);
+    started({ authUrl: "https://login.example/authorize?state=s1", state: "s1" });
   });
 });
 

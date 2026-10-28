@@ -103,7 +103,13 @@ function usePopupRedirectWatch(
     if (!active) return;
     const interval = window.setInterval(() => {
       const popup = popupRef.current;
-      const message = popup ? readSameOriginRedirect(popup) : null;
+      // A closed popup can no longer report a result; the paste fallback
+      // stays available for an address the user copied before closing it.
+      if (!popup || popup.closed) {
+        window.clearInterval(interval);
+        return;
+      }
+      const message = readSameOriginRedirect(popup);
       if (message && message.state === pendingStateRef.current) onMessage(message);
     }, POPUP_WATCH_INTERVAL_MS);
     return () => window.clearInterval(interval);
@@ -121,6 +127,42 @@ export type AzureDevOpsOAuthConnect = {
   cancel: () => void;
 };
 
+/** Completes one authorization result at a time: the pasted address, the
+ *  popup message, and the redirect watch can all report the same result. */
+function useOAuthCompletion(
+  workspaceId: string,
+  pendingStateRef: RefObject<string | null>,
+  reset: () => void,
+  fail: (error: string) => void,
+  onConnectedRef: RefObject<(config: AzureDevOpsConfig) => void>,
+) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const [completing, setCompleting] = useState(false);
+  const completingRef = useRef(false);
+  const complete = useCallback(
+    async (code: string, state: string) => {
+      if (completingRef.current) return;
+      completingRef.current = true;
+      pendingStateRef.current = null;
+      setCompleting(true);
+      try {
+        const config = await completeAzureDevOpsOAuth(workspaceId, { code, state });
+        reset();
+        toast({ description: t("azuredevops:oauthConnected"), variant: "success" });
+        onConnectedRef.current(config);
+      } catch (err) {
+        fail(errorMessage(err));
+      } finally {
+        completingRef.current = false;
+        setCompleting(false);
+      }
+    },
+    [fail, onConnectedRef, pendingStateRef, reset, t, toast, workspaceId],
+  );
+  return { completing, completingRef, complete };
+}
+
 export function useAzureDevOpsOAuthConnect(
   workspaceId: string,
   request: StartAzureDevOpsOAuthRequest,
@@ -129,7 +171,6 @@ export function useAzureDevOpsOAuthConnect(
   const { t } = useTranslation();
   const { toast } = useToast();
   const [connecting, setConnecting] = useState(false);
-  const [completing, setCompleting] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteUrl, setPasteUrl] = useState("");
   const popupRef = useRef<Window | null>(null);
@@ -151,21 +192,12 @@ export function useAzureDevOpsOAuthConnect(
     setPasteUrl("");
   }, []);
 
-  const complete = useCallback(
-    async (code: string, state: string) => {
-      setCompleting(true);
-      try {
-        const config = await completeAzureDevOpsOAuth(workspaceId, { code, state });
-        reset();
-        toast({ description: t("azuredevops:oauthConnected"), variant: "success" });
-        onConnectedRef.current(config);
-      } catch (err) {
-        fail(errorMessage(err));
-      } finally {
-        setCompleting(false);
-      }
-    },
-    [fail, onConnectedRef, reset, t, toast, workspaceId],
+  const { completing, completingRef, complete } = useOAuthCompletion(
+    workspaceId,
+    pendingStateRef,
+    reset,
+    fail,
+    onConnectedRef,
   );
 
   const handleMessage = useCallback(
@@ -189,6 +221,7 @@ export function useAzureDevOpsOAuthConnect(
   usePopupRedirectWatch(pasteOpen, popupRef, pendingStateRef, handleMessage);
 
   const connect = useCallback(async () => {
+    if (completingRef.current) return;
     const popup = window.open("", "_blank");
     if (!popup) {
       toast({ description: t("azuredevops:oauthPopupBlocked"), variant: "error" });

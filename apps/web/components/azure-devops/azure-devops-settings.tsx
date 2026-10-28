@@ -59,9 +59,9 @@ import {
   testAzureDevOpsConnection,
 } from "@/lib/api/domains/azure-devops-api";
 import {
-  getAzureDevOpsOAuthAvailability,
-  signOutAzureDevOpsOAuth,
-} from "@/lib/api/domains/azure-devops-oauth-api";
+  useDefaultOAuthClientId,
+  useOAuthSignOut,
+} from "@/hooks/domains/azure-devops/use-azure-devops-oauth";
 import type { AzureDevOpsConfig, TestAzureDevOpsConnectionResult } from "@/lib/types/azure-devops";
 import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
@@ -77,41 +77,6 @@ function useConfigRefresh(
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(interval);
   }, [setConfig, workspaceId]);
-}
-
-function useDefaultOAuthClientId(workspaceId: string): string {
-  const [clientId, setClientId] = useState("");
-  useEffect(() => {
-    let active = true;
-    getAzureDevOpsOAuthAvailability(workspaceId)
-      .then((next) => active && setClientId(next.defaultClientId))
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [workspaceId]);
-  return clientId;
-}
-
-function useOAuthSignOut(workspaceId: string, applyConfig: (config: AzureDevOpsConfig) => void) {
-  const { t } = useTranslation();
-  const { toast } = useToast();
-  const [signingOut, setSigningOut] = useState(false);
-  const signOut = useCallback(async () => {
-    setSigningOut(true);
-    try {
-      applyConfig(await signOutAzureDevOpsOAuth(workspaceId));
-      toast({ description: t("azuredevops:oauthSignedOut"), variant: "success" });
-    } catch (err) {
-      toast({
-        description: t("azuredevops:oauthSignOutFailed", { error: String(err) }),
-        variant: "error",
-      });
-    } finally {
-      setSigningOut(false);
-    }
-  }, [applyConfig, t, toast, workspaceId]);
-  return { signingOut, signOut: () => void signOut() };
 }
 
 function useAzureDevOpsSettings(workspaceId: string) {

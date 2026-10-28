@@ -95,24 +95,18 @@ func (s *Store) InsertOAuthFlow(ctx context.Context, flow *oauthFlow, now time.T
 	return err
 }
 
-// ConsumeOAuthFlow claims a live, unconsumed attempt exactly once. It returns
-// nil when the state is unknown, expired, or already used.
+// ConsumeOAuthFlow claims a live, unconsumed attempt exactly once and returns
+// it in the same statement, so a concurrent purge cannot remove the claimed row
+// before it is read. It returns nil when the state is unknown, expired, or
+// already used.
 func (s *Store) ConsumeOAuthFlow(ctx context.Context, stateHash string, now time.Time) (*oauthFlow, error) {
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		UPDATE azure_devops_oauth_flows SET consumed_at = ?
-		WHERE state_hash = ? AND consumed_at IS NULL AND expires_at > ?`), now, stateHash, now)
-	if err != nil {
-		return nil, err
-	}
-	if claimed, err := result.RowsAffected(); err != nil || claimed != 1 {
-		return nil, err
-	}
 	var flow oauthFlow
-	err = s.db.GetContext(ctx, &flow, s.db.Rebind(`
-		SELECT state_hash, workspace_id, user_id, organization_url, default_project_id,
+	err := s.db.GetContext(ctx, &flow, s.db.Rebind(`
+		UPDATE azure_devops_oauth_flows SET consumed_at = ?
+		WHERE state_hash = ? AND consumed_at IS NULL AND expires_at > ?
+		RETURNING state_hash, workspace_id, user_id, organization_url, default_project_id,
 			default_project_name, tenant_id, client_id, pkce_verifier, redirect_url, expires_at,
-			consumed_at, created_at
-		FROM azure_devops_oauth_flows WHERE state_hash = ?`), stateHash)
+			consumed_at, created_at`), now, stateHash, now)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

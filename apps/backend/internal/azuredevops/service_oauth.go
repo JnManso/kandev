@@ -181,7 +181,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, workspaceID string, req *Co
 	if identity == nil || !identity.OK {
 		return nil, errors.New("azure devops: the signed-in account cannot access this organization")
 	}
-	if err := s.persistOAuthConnection(ctx, cfg, flow, oauthAccountName(identity), token); err != nil {
+	if err := s.replaceOAuthConnection(ctx, cfg, flow, oauthAccountName(identity), token); err != nil {
 		return nil, err
 	}
 	s.log.Info("azure devops oauth completed", zap.String("workspace_id", workspaceID))
@@ -212,8 +212,21 @@ func oauthAccountName(identity *TestConnectionResult) string {
 	return identity.Email
 }
 
+// replaceOAuthConnection installs a new Microsoft credential under the
+// workspace's renewal lock, so a renewal that started for the previous
+// credential cannot overwrite it afterwards.
+func (s *Service) replaceOAuthConnection(
+	ctx context.Context, cfg *Config, flow *oauthFlow, account string, token *entraToken,
+) error {
+	unlock := s.oauthLocks.lock(cfg.WorkspaceID)
+	defer unlock()
+	return s.persistOAuthConnection(ctx, cfg, flow, account, token)
+}
+
 // persistOAuthConnection stores the tokens, switches the workspace to the
-// Microsoft account, and removes the replaced PAT.
+// Microsoft account, and removes the replaced PAT. If any write fails, the
+// previous Microsoft tokens are restored so the existing connection stays
+// usable. Callers hold the workspace's renewal lock.
 func (s *Service) persistOAuthConnection(
 	ctx context.Context, cfg *Config, flow *oauthFlow, account string, token *entraToken,
 ) error {
@@ -223,20 +236,33 @@ func (s *Service) persistOAuthConnection(
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthPersistenceTimeout)
 	defer cancel()
 	workspaceID := cfg.WorkspaceID
-	if err := s.storeOAuthTokens(persistCtx, workspaceID, token.RefreshToken, token.AccessToken); err != nil {
+	previous, err := s.snapshotOAuthTokens(persistCtx, workspaceID)
+	if err != nil {
 		return err
 	}
-	if err := s.store.UpsertConfig(persistCtx, cfg); err != nil {
+	if err := s.writeOAuthConnection(persistCtx, cfg, flow, account, token); err != nil {
+		return joinMutationError(err, s.restoreOAuthTokens(persistCtx, workspaceID, previous))
+	}
+	s.removeStoredPAT(persistCtx, workspaceID)
+	return nil
+}
+
+func (s *Service) writeOAuthConnection(
+	ctx context.Context, cfg *Config, flow *oauthFlow, account string, token *entraToken,
+) error {
+	if err := s.storeOAuthTokens(ctx, cfg.WorkspaceID, token.RefreshToken, token.AccessToken); err != nil {
+		return err
+	}
+	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
 		return fmt.Errorf("upsert azure devops config: %w", err)
 	}
 	expiresAt := time.Now().UTC().Add(time.Duration(token.ExpiresIn) * time.Second)
-	if err := s.store.SetOAuthCredentialState(persistCtx, workspaceID, oauthCredentialState{
+	if err := s.store.SetOAuthCredentialState(ctx, cfg.WorkspaceID, oauthCredentialState{
 		Account: account, TenantID: flow.TenantID, ClientID: flow.ClientID,
 		RedirectURL: flow.RedirectURL, TokenExpiresAt: &expiresAt,
 	}); err != nil {
 		return fmt.Errorf("record microsoft sign-in: %w", err)
 	}
-	s.removeStoredPAT(persistCtx, workspaceID)
 	return nil
 }
 
