@@ -66,6 +66,7 @@ type mockAgentServer struct {
 	materialized         []materializedUpload
 	failMaterialize      bool
 	materializedName     string
+	promptAttachments    [][]v1.MessageAttachment
 }
 
 // materializedUpload records one /api/v1/attachments/materialize request so a
@@ -287,6 +288,12 @@ func (m *mockAgentServer) materializedUploads() []materializedUpload {
 }
 
 // setFailMaterialize makes the materialization endpoint reject every upload.
+func (m *mockAgentServer) promptAttachmentSets() [][]v1.MessageAttachment {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([][]v1.MessageAttachment(nil), m.promptAttachments...)
+}
+
 func (m *mockAgentServer) setFailMaterialize(fail bool) {
 	m.mu.Lock()
 	m.failMaterialize = fail
@@ -331,6 +338,13 @@ func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 		})
 		return resp
 	case "agent.prompt":
+		var request struct {
+			Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
+		}
+		_ = msg.ParsePayload(&request)
+		m.mu.Lock()
+		m.promptAttachments = append(m.promptAttachments, request.Attachments)
+		m.mu.Unlock()
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success": true,
 		})
@@ -2928,10 +2942,11 @@ func TestWaitForPromptDone_PublishesSingleStall(t *testing.T) {
 		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
 		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
 		execution := &AgentExecution{
-			ID:           "test-exec",
-			TaskID:       "test-task",
-			SessionID:    "test-session",
-			promptDoneCh: make(chan PromptCompletionSignal, 1),
+			promptGeneration: 7,
+			ID:               "test-exec",
+			TaskID:           "test-task",
+			SessionID:        "test-session",
+			promptDoneCh:     make(chan PromptCompletionSignal, 1),
 		}
 		execution.lastActivityAt = time.Now()
 
@@ -2962,33 +2977,6 @@ func TestWaitForPromptDone_PublishesSingleStall(t *testing.T) {
 	})
 }
 
-func TestMarkPromptDispatchedArmsActivityAfterDispatch(t *testing.T) {
-	store := NewExecutionStore()
-	execution := &AgentExecution{
-		ID:                         "test-exec",
-		SessionID:                  "test-session",
-		promptGeneration:           3,
-		agentEventSincePrompt:      true,
-		promptActivityEpoch:        2,
-		promptCompletionGeneration: 0,
-	}
-	if err := store.Add(execution); err != nil {
-		t.Fatalf("add execution: %v", err)
-	}
-	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
-	sm.executionStore = store
-
-	sm.markPromptDispatched(execution, 3)
-
-	_, agentEventSeen, epoch := execution.promptActivitySnapshot()
-	if agentEventSeen {
-		t.Fatal("prompt dispatch left the previous activity marker armed")
-	}
-	if epoch != 3 {
-		t.Fatalf("activity epoch = %d, want 3 after dispatch", epoch)
-	}
-}
-
 // TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted verifies that
 // agentEventSincePrompt (armed false on dispatch, set true only by a genuine
 // agent event) is threaded into the published stall payload's NeverStarted
@@ -3001,10 +2989,11 @@ func TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted(t *testing.T) {
 		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
 		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
 		execution := &AgentExecution{
-			ID:           "test-exec",
-			TaskID:       "test-task",
-			SessionID:    "test-session",
-			promptDoneCh: make(chan PromptCompletionSignal, 1),
+			promptGeneration: 7,
+			ID:               "test-exec",
+			TaskID:           "test-task",
+			SessionID:        "test-session",
+			promptDoneCh:     make(chan PromptCompletionSignal, 1),
 		}
 		// Mirrors sendPrompt's dispatch bump: activity timestamp moves, but the
 		// discriminator is armed false because no agent event has arrived yet.
@@ -3040,11 +3029,12 @@ func TestWaitForPromptDone_StallPayloadReportsRunningAfterAgentEvent(t *testing.
 		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
 		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
 		execution := &AgentExecution{
-			ID:           "test-exec",
-			TaskID:       "test-task",
-			SessionID:    "test-session",
-			promptDoneCh: make(chan PromptCompletionSignal, 1),
-			Status:       v1.AgentStatusRunning,
+			promptGeneration: 7,
+			ID:               "test-exec",
+			TaskID:           "test-task",
+			SessionID:        "test-session",
+			promptDoneCh:     make(chan PromptCompletionSignal, 1),
+			Status:           v1.AgentStatusRunning,
 		}
 		execution.lastActivityAt = time.Now()
 		execution.agentEventSincePrompt = false

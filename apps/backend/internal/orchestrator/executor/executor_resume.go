@@ -664,13 +664,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 	return repoclone.RemoteRefStateHasRefs, nil
 }
 
-func (e *Executor) refreshAzureDevOpsRepositoryForSession(
-	ctx context.Context, repo *models.Repository, cloneURL string,
-) error {
-	_, err := e.refreshAzureDevOpsRepositoryForSessionWithState(ctx, repo, cloneURL)
-	return err
-}
-
 func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (repoclone.RemoteRefState, error) {
@@ -900,28 +893,26 @@ func gitHubCheckoutOriginURL(
 // repositories. Authentication and clone-url construction deliberately remain
 // inside Executor so callers never receive credentials or construct git calls.
 func (e *Executor) EnsureRepositoryCloned(ctx context.Context, repo *models.Repository) (string, error) {
-	return e.EnsureRepositoryClonedForSession(ctx, "", "", repo)
-}
-
-// EnsureRepositoryClonedForSession materializes a provider repository with
-// exact task/session scope for plugin credential resolution.
-func (e *Executor) EnsureRepositoryClonedForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository,
-) (string, error) {
 	if repo == nil {
 		return "", errors.New("repository is required")
 	}
 	if repo.LocalPath != "" {
 		return repo.LocalPath, nil
 	}
-	path, err := e.ensureRepoClonedForSession(ctx, taskID, sessionID, repo)
-	if err != nil {
-		return "", err
-	}
-	if path != "" {
+	path, err := e.ensureRepoClonedForSession(ctx, "", "", repo)
+	if err == nil && path != "" {
 		repo.LocalPath = path
 	}
-	return path, nil
+	return path, err
+}
+
+// EnsureRepositoryClonedForSession materializes a provider repository with
+// exact task/session scope for plugin credential resolution.
+func (e *Executor) EnsureRepositoryClonedForSession(ctx context.Context, taskID, sessionID string, repo *models.Repository) (string, error) {
+	if repo == nil {
+		return "", errors.New("repository is required")
+	}
+	return e.materializeHostAttachment(ctx, taskID, sessionID, repo)
 }
 
 // backfillRepoDefaultBranch populates repo.DefaultBranch from the local clone
@@ -1435,7 +1426,20 @@ func (e *Executor) resumeSession(
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
-			if startAgent {
+			if startAgent && resumeInitialState == models.TaskSessionStateWaitingForInput &&
+				e.agentManager.IsAgentReadyForPrompt(ctx, session.ID) {
+				// A recovered idle runtime has no new boot event to clear our STARTING claim.
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, resumeInitialErrorMessage,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					if errors.Is(rollbackErr, ErrSessionStateSuperseded) {
+						// A newer owner preserves the duplicate-runtime classification.
+						return nil, errors.Join(ErrExecutionAlreadyRunning, rollbackErr)
+					}
+					return nil, rollbackErr
+				}
+			} else if startAgent {
 				// The live process owns this session's active lifecycle. Keep the
 				// STARTING projection for that process to reconcile instead of
 				// marking it FAILED as if this duplicate launch had failed.
@@ -2361,18 +2365,6 @@ func (e *Executor) applyResumeWorkspaceFolders(
 	return nil
 }
 
-func (e *Executor) configureResumeGitHubCredentials(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	session *models.TaskSession,
-	repositories []*repoInfo,
-	beforeCredentialLease func() error,
-) error {
-	return e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
-		ctx, req, session, repositories, beforeCredentialLease, nil, true,
-	)
-}
-
 func (e *Executor) configureResumeGitHubCredentialsWithProfileEnvAndBridge(
 	ctx context.Context,
 	req *LaunchAgentRequest,
@@ -2648,8 +2640,14 @@ func (e *Executor) applyResumeRepoConfig(
 	// is the only other writer of req.BaseBranch outside the worktree path, and it
 	// skips clone-URL setup entirely once reuse is required. Local executors are
 	// excluded so LocalPreparer keeps using the current on-disk branch.
-	if baseBranch != "" && e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType) {
+	requiresCloneURL := e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType)
+	if baseBranch != "" && requiresCloneURL {
 		req.BaseBranch = baseBranch
+	}
+	// Clone-URL resumes carry checkout-branch identity without requesting
+	// another checkout.
+	if req.WorkspaceReuseRequired && req.BranchIdentitySlug == "" && requiresCloneURL {
+		req.BranchIdentitySlug = resumeCheckoutBranchIdentity(repositoryID, allRepos)
 	}
 
 	var repository *models.Repository
@@ -2721,6 +2719,26 @@ func resolveResumeRepoIDAndBranch(session *models.TaskSession, allRepos []*repoI
 		repositoryID = allRepos[0].RepositoryID
 	}
 	return repositoryID, session.BaseBranch
+}
+
+// resumeCheckoutBranchIdentity returns the sanitized checkout-branch slug of
+// the single task-repository row for repositoryID, or "" when the row has no
+// checkout branch or the repository is attached more than once (ambiguous).
+func resumeCheckoutBranchIdentity(repositoryID string, repos []*repoInfo) string {
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return ""
+		}
+		match = info
+	}
+	if match == nil || strings.TrimSpace(match.CheckoutBranch) == "" {
+		return ""
+	}
+	return worktree.SanitizeBranchSlug(match.CheckoutBranch)
 }
 
 // resolveResumeBaseBranch prefers the current task-repository row when a

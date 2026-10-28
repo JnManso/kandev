@@ -22,7 +22,7 @@ Tasks owns the immutable interval and transcript anchor.
 Runtime provides ordered executor access; agentctl owns Git capture; user settings owns policy resolution.
 Frontend consumers reuse the existing diff renderer and responsive workbench.
 
-The [source inventory](../../../plans/turn-changed-files/plan.md#source-inventory) distinguishes existing and proposed contracts; mutable Git status and event subscribers cannot establish interval ordering.
+Mutable Git status and event subscribers cannot establish interval ordering.
 
 ## Requirement mapping
 
@@ -277,7 +277,7 @@ Proposed initial retention policy:
 - Preserve summary rows and expiry reasons until conversation deletion removes their owner.
 - Apply the same policy to archived tasks; archive itself does not expire history.
 
-These limits are proposed defaults, not measurements. Use typed policy constants; public retention controls remain outside scope.
+Use typed policy constants for these unmeasured defaults; public controls remain outside scope.
 Serialize global byte admission and eviction through existing maintenance/storage mutation conventions.
 Expiry atomically clears content links, marks affected entries expired, and updates the summary revision.
 Delete shared payloads only when no retained link references them.
@@ -344,16 +344,12 @@ Eligible pending/failure rows use the same anchor. Chat uses `isTurnChangeCardVi
 Existing unread, bottom-follow, and reader-position claims remain authoritative.
 Capture updates invalidate only the affected row and preserve the reader's viewport anchor.
 
-The shared tree groups exact paths under checkout roots and aggregates known counts plus binary/unknown markers.
-Folders start collapsed; root files stay visible; status icons have accessible labels.
-Full paths appear on focus/hover, with touch disclosure on phones.
-Open diff, folder toggles, and expand-all remain independent actions.
+The tree groups paths by checkout. Folders start collapsed. Preserve known counts, binary/unknown markers, accessible labels, full-path disclosure, and independent navigation.
 
-Store expansion and selected entry by session/change-set ID in existing UI persistence conventions.
-Namespace user-private state; prune it when its owning session is removed.
-Do not store patch contents in localStorage or mutate the live Git cache.
-Use nested semantic disclosure buttons, or a tree with complete roving-focus behavior.
-Do not add `role=tree` without its keyboard contract.
+AC-TASKS-TURN-CHANGES-005.10 through 005.12 use `FileIcon` and `LineStat` in `TurnChangedFilesCard`, with Changes colors for textual kinds. Unknown/binary counts retain labels. Historical rows never gain live Git controls.
+Add non-collapsing 16px space outside the card border at both transcript anchors. Preserve scroll ownership and phone targets.
+
+Persist user-private expansion/selection by session/change-set; prune on session removal. Never persist patches in localStorage or mutate live Git state. Use semantic disclosure buttons unless full tree keyboard support exists.
 
 Availability projection:
 
@@ -412,7 +408,7 @@ Use the existing Traditional Chinese conversion workflow.
 
 ## Bounds
 
-The following defaults are proposed operational bounds, subject to measured validation before implementation is marked complete:
+Proposed bounds require measurement before completion:
 
 | Work | Initial bound | Limit behavior |
 | --- | --- | --- |
@@ -431,8 +427,10 @@ The following defaults are proposed operational bounds, subject to measured vali
 Honor shared Git process admission and managed process-group termination.
 Deadlines include filters, executor transport, SQL persistence, and ref/export verification.
 Do not retry authentication, unsupported index shapes, malformed output, or output-limit failures as transient errors.
-End capture cannot remain pending after the bounded terminal attempt settles.
-Accepted endpoints never change on comparison/export retry.
+Settle terminal failure durably and release the capture fence. Unavailable,
+incomplete settlement may bypass `start_accepted`, preserving policy and revision
+guards. Ready results require accepted starts. Never recapture missing starts or
+change accepted endpoints on retry.
 
 ## Observability and measurements
 
@@ -440,7 +438,7 @@ Record `turn_changes_capture_duration`, `turn_changes_compare_duration`, `turn_c
 `turn_changes_capture_failures_total`, and `turn_changes_retained_bytes` through existing metrics/log conventions.
 Use closed labels: endpoint, executor kind, result, and reason.
 IDs and paths belong only in structured logs, not metric labels. Do not log contents or credentials.
-Known overlap records come from admitted execution intervals on the same checkout; external writer coverage remains unknown.
+Overlap records cover admitted intervals on the same checkout; external writers remain unknown.
 
 Work order 09 owns representative benchmarks, environment reporting, ten-observation samples, storage growth, and limit qualification.
 No source-only latency claims are acceptable.
@@ -453,3 +451,5 @@ No source-only latency claims are acceptable.
 - [Prompt completion ownership](../../platform/system-design/prompt-completion-ownership.md)
 - [Git diff metadata](../../platform/system-design/git-diff-file-metadata.md)
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
+
+[Presentation plan](../../../plans/turn-changed-files-presentation/plan.md).

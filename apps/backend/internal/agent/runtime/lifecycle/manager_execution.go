@@ -260,6 +260,22 @@ func (m *Manager) doCoalescedExecution(
 	key string,
 	operation func(context.Context) (interface{}, error),
 ) (interface{}, error) {
+	for {
+		value, err := m.submitExecutionOperation(ctx, key, operation)
+		if _, serialized := value.(*serializedExecutionResult); !serialized || err != nil {
+			return value, err
+		}
+	}
+}
+
+func (m *Manager) submitExecutionOperation(
+	ctx context.Context,
+	key string,
+	operation func(context.Context) (interface{}, error),
+) (interface{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	result := m.ensureExecutionGroup.DoChan(key, func() (interface{}, error) {
 		sharedCtx, cancel := m.coalescedExecutionContext(ctx)
 		defer cancel()
@@ -1160,6 +1176,8 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
+			WorkspaceID:                    info.WorkspaceID,
+			RepositoryIDs:                  repositoryIDsFromWorkspace(info.WorkspaceRepositories),
 			DurableJournalHostRoot:         m.dataDir,
 			DurableJournalOwnerID:          journalOwnerID,
 			DeliveryIncarnationID:          info.DeliveryIncarnationID,
@@ -1176,6 +1194,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AutoApprovePermissions:         autoApprove,
 			AutoApprovePermissionsOverride: autoApproveOverride,
 			McpMode:                        info.McpMode,
+			PromptSuggestions:              m.promptSuggestionsForLaunch(ctx, info.McpMode),
 			AgentConfig:                    agentConfig,
 			Metadata:                       metadata,
 			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),
@@ -1603,17 +1622,6 @@ func (m *Manager) persistRequiredKubernetesRuntimeSecrets(
 // and saves the secret ID in the execution's metadata for recovery after restart.
 func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
 	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyAuthTokenSecret, "agentctl-auth", instance.AuthToken)
-}
-
-func (m *Manager) persistBootstrapNonce(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce)
-}
-
-func (m *Manager) persistContainerControlAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	if instance == nil || instance.ContainerID == "" {
-		return
-	}
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyContainerControlAuthSecret, "agentctl-container-control", instance.AuthToken)
 }
 
 func (m *Manager) persistRuntimeSecret(

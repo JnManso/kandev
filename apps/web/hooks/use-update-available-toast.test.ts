@@ -115,6 +115,37 @@ describe("useUpdateAvailableToast delivery", () => {
     expect(mockClearNotification).toHaveBeenCalledWith(null);
   });
 
+  it("localizes standard Kandev update notifications even when the backend includes English copy", async () => {
+    const { i18n, preloadLocale } = await import("@/lib/i18n");
+    await preloadLocale("pseudo");
+    try {
+      mockNotification = updateNotification();
+      mockNativeIsAvailable.mockReturnValue(true);
+      renderHook(() => useUpdateAvailableToast());
+      const toast = mockToast.mock.calls[0]?.[0];
+      expect(toast.title).toBe("Ķàńďēv ũƥďàţē àvàĩĺàƀĺē");
+      expect(toast.description).toContain("Ķàńďēv v1.2.3 ĩś àvàĩĺàƀĺē");
+      expect(mockNativeShow).toHaveBeenCalledWith(
+        expect.objectContaining({ title: toast.title, body: toast.description }),
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("retains legacy notification copy when no release version is available", () => {
+    mockNotification = {
+      ...updateNotification(),
+      version: undefined,
+      title: "Legacy title",
+      body: "Legacy body",
+    };
+    renderHook(() => useUpdateAvailableToast());
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Legacy title", description: "Legacy body" }),
+    );
+  });
+
   it("also attempts native delivery without replacing the toast", () => {
     mockNotification = updateNotification();
     mockNativeIsAvailable.mockReturnValue(true);
@@ -157,6 +188,36 @@ describe("useUpdateAvailableToast delivery", () => {
     renderHook(() => useUpdateAvailableToast());
     expect(mockToast).toHaveBeenCalledTimes(1);
     expect(mockNativeShow).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useUpdateAvailableToast application locale", () => {
+  beforeEach(resetUpdateToastHook);
+
+  // @covers AC-PLATFORM-I18N-001.1, AC-PLATFORM-NOTIFICATIONS-001.16
+  it("localizes application release copy for toast and native delivery in Portuguese", async () => {
+    const { activateLocale } = await import("@/lib/i18n");
+    await activateLocale("pt-pt");
+    mockNotification = {
+      ...updateNotification(),
+      body: "Kandev v1.2.3 is available. Open Settings > System > Updates to review it.",
+    };
+    mockNativeIsAvailable.mockReturnValue(true);
+    const { unmount } = renderHook(() => useUpdateAvailableToast());
+    const title = "Atualização do Kandev disponível";
+    const body =
+      "O Kandev v1.2.3 está disponível. Abra Definições > Sistema > Atualizações para o rever.";
+    try {
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title, description: body, placement: "top" }),
+      );
+      expect(mockNativeShow).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: "system.update_available:v1.2.3", title, body }),
+      );
+    } finally {
+      unmount();
+      await activateLocale("en");
+    }
   });
 });
 

@@ -82,8 +82,7 @@ type PromptAttemptEvidence struct {
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
-// The activity epoch lets the consumer reject a stale watchdog snapshot. A
-// never-started prompt is terminal only when its snapshot remains current.
+// The activity epoch lets the consumer reject a stale watchdog snapshot.
 type AgentStalledPayload struct {
 	AgentExecutionID string        `json:"agent_execution_id"`
 	TaskID           string        `json:"task_id"`
@@ -96,8 +95,10 @@ type AgentStalledPayload struct {
 	ToolName         string        `json:"tool_name,omitempty"`
 	ToolTitle        string        `json:"tool_title,omitempty"`
 	ToolStatus       string        `json:"tool_status,omitempty"`
-	// NeverStarted is true when the agent has not emitted a single event since
-	// this prompt was dispatched — a terminal failure, not a mid-work pause.
+	PromptAccepted   bool          `json:"prompt_accepted"`
+	OutputObserved   bool          `json:"output_observed"`
+	// NeverStarted is a compatibility alias for !OutputObserved. It does not
+	// establish startup failure or authorize process teardown.
 	NeverStarted bool `json:"never_started"`
 }
 
@@ -294,11 +295,12 @@ type AgentStreamEventData struct {
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
 
 	// Agent capabilities (from "agent_capabilities" event)
-	SupportsImage           bool                     `json:"supports_image"`
-	SupportsAudio           bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
-	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
+	SupportsImage             bool                     `json:"supports_image"`
+	SupportsAudio             bool                     `json:"supports_audio"`
+	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
+	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)
 	CurrentModelID string                     `json:"current_model_id,omitempty"`
@@ -677,15 +679,16 @@ func (p SessionModeEventPayload) GetSessionID() string {
 
 // AgentCapabilitiesEventPayload is the payload for agent capabilities events.
 type AgentCapabilitiesEventPayload struct {
-	TaskID                  string                   `json:"task_id"`
-	SessionID               string                   `json:"session_id"`
-	AgentID                 string                   `json:"agent_id"`
-	SupportsImage           bool                     `json:"supports_image"`
-	SupportsAudio           bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
-	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods"`
-	Timestamp               string                   `json:"timestamp"`
+	TaskID                    string                   `json:"task_id"`
+	SessionID                 string                   `json:"session_id"`
+	AgentID                   string                   `json:"agent_id"`
+	SupportsImage             bool                     `json:"supports_image"`
+	SupportsAudio             bool                     `json:"supports_audio"`
+	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
+	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods"`
+	Timestamp                 string                   `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

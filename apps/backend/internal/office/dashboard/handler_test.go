@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -193,7 +195,6 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL DEFAULT '',
-		agent_execution_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		state TEXT NOT NULL DEFAULT 'CREATED',
 		started_at TIMESTAMP,
@@ -830,7 +831,7 @@ func TestListComments_PopulatesRunState(t *testing.T) {
 		}
 	}
 
-	finishedRun := &models.Run{
+	finishedRun := &runsmodels.Run{
 		ID:             "run-finished",
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
@@ -842,7 +843,7 @@ func TestListComments_PopulatesRunState(t *testing.T) {
 	if err := deps.repo.CreateRun(ctx, finishedRun); err != nil {
 		t.Fatalf("create finished run: %v", err)
 	}
-	failedRun := &models.Run{
+	failedRun := &runsmodels.Run{
 		ID:             "run-failed",
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
