@@ -41,6 +41,9 @@ Linked-task display does not change association validation or stored identities,
 introduce a migration, or infer historical project names after an Azure project
 rename. It adds no provider mutation or new detail interaction.
 
+Microsoft account sign-in as an alternative to the PAT credential is owned by
+[Azure DevOps Microsoft Sign-In](azure-devops-oauth.md).
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/azure-devops-integration-01.md), [part 2](../system-design/azure-devops-integration-02.md).
