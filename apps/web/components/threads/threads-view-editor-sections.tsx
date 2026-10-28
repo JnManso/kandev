@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import type { ThreadCandidate } from "@/lib/threads/thread-view-query";
+import { effectiveThreadSort, type ThreadCandidate } from "@/lib/threads/thread-view-query";
 import type {
   ThreadFilterClause,
   ThreadSortSpec,
@@ -509,7 +509,7 @@ function ThreadSortSection({
       <SectionLabel>{t("threads:sort")}</SectionLabel>
       <div className="flex items-center gap-1">
         <TypedSortPicker
-          value={sort}
+          value={effectiveThreadSort(sort, scopeMode)}
           options={threadSortOptionsForScope(scopeMode).map((option) => ({
             key: option.key,
             label: t(option.labelKey),

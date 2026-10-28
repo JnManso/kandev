@@ -1,8 +1,5 @@
-import type {
-  ThreadSortSpec,
-  ThreadTaskScope,
-  ThreadView,
-} from "@/lib/state/slices/ui/thread-view-types";
+import type { ThreadTaskScope, ThreadView } from "@/lib/state/slices/ui/thread-view-types";
+import { ATTENTION_SORT } from "@/lib/threads/thread-view-query";
 
 export const MIN_THREAD_VIEW_COLUMNS = 1;
 export const MAX_THREAD_VIEW_COLUMNS = 30;
@@ -55,8 +52,6 @@ export function updateVisibleThreadTaskSelection(
   }
   return next;
 }
-
-const ATTENTION_SORT: ThreadSortSpec = { key: "attention", direction: "asc" };
 
 /**
  * The draft fields to write when the task-scope mode changes. Selection order

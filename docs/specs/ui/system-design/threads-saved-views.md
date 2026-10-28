@@ -338,9 +338,11 @@ direction and the task-ID tie-breaker apply as they do for other keys. The rank
 depends only on saved preferences. Therefore a reload, a backend restart, and
 task events produce the same full order.
 
-`queryThreadView` resolves the effective sort before it compares candidates.
-A `selection` key with the `all` scope uses ascending attention. This keeps a
-stored or synchronized combination valid without rewriting the view.
+`queryThreadView` resolves the effective sort through `effectiveThreadSort`
+before it compares candidates. A `selection` key with the `all` scope uses
+ascending attention. This keeps a stored or synchronized combination valid
+without rewriting the view. The sort picker displays the same effective sort,
+so its key and direction always describe the order on screen.
 
 `THREAD_SORT_OPTIONS` registers Selection order with a localized label and
 description. `ThreadSortSection` receives the effective scope mode and omits

@@ -153,3 +153,14 @@ Verification:
 - Desktop `threads-view.spec.ts`: 10 passed. Phone
   `mobile-threads-view.spec.ts`: 8 passed.
 - `list-docs.py validate` and `lint-spec-files.py --all`: pass.
+
+PR review remediation (PR #4916):
+
+- The sort picker now displays `effectiveThreadSort`, so a stored `selection`
+  sort with the `all` scope shows ascending attention instead of an unlabelled
+  key and a stale direction. `ATTENTION_SORT` has one owner in
+  `thread-view-query.ts`.
+- `AC-UI-THREADS-SAVED-VIEWS-003.15` and the public guide state the live
+  arrival exception; behavior is unchanged.
+- Vitest on `components/threads`, `app/threads`, `lib/threads`,
+  `lib/state/slices/ui`: 47 files, 498 passed.

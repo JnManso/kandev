@@ -333,8 +333,10 @@ returns when there is enough height, without changing the saved choice.
    columns. Each selected task shows its position.
 4. Select **Save**.
 
-The deck keeps that order after a reload and while the agents work. To move a
-task to the end, clear it and select it again. **Select all** adds the visible
+The deck keeps that order after a reload and while the agents work. A selected
+task that only becomes active while the page is open joins at the end; reload or
+select **Reapply sort** to move it into its selected position. To move a task to
+the end, clear it and select it again. **Select all** adds the visible
 tasks in list order. Use the direction button to reverse the order. Selection
 order is available only for selected tasks; switching the scope to **All
 eligible tasks** changes the sort to **Attention**.

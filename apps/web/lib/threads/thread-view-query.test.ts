@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { ThreadFilterClause, ThreadView } from "@/lib/state/slices/ui/thread-view-types";
-import { queryThreadView, selectThreadCandidates } from "./thread-view-query";
+import { effectiveThreadSort, queryThreadView, selectThreadCandidates } from "./thread-view-query";
 
 type TaskOverrides = Partial<KanbanState["tasks"][number]> & { id: string };
 const REVIEW_STEP_ID = "step-review";
@@ -400,6 +400,27 @@ describe("queryThreadView selection order", () => {
       "running",
       "waiting",
     ]);
+  });
+});
+
+describe("effectiveThreadSort", () => {
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.17
+  it("shows a stored selection sort with the all scope as ascending attention", () => {
+    expect(effectiveThreadSort({ key: "selection", direction: "desc" }, "all")).toEqual({
+      key: "attention",
+      direction: "asc",
+    });
+  });
+
+  it("keeps the stored sort for every other scope and key combination", () => {
+    expect(effectiveThreadSort({ key: "selection", direction: "desc" }, "selected")).toEqual({
+      key: "selection",
+      direction: "desc",
+    });
+    expect(effectiveThreadSort({ key: "title", direction: "desc" }, "all")).toEqual({
+      key: "title",
+      direction: "desc",
+    });
   });
 });
 

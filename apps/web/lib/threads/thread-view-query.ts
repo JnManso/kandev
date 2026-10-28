@@ -397,13 +397,15 @@ function compareSortKey(
   }
 }
 
-const ATTENTION_SORT: ThreadSortSpec = { key: "attention", direction: "asc" };
+/** The sort a view falls back to when Selection order has no task list to rank. */
+export const ATTENTION_SORT: ThreadSortSpec = { key: "attention", direction: "asc" };
 
 /** Selection order ranks by the selected scope's task list; the all scope has none. */
-function effectiveSort(view: ThreadView): ThreadSortSpec {
-  return view.sort.key === "selection" && view.taskScope.mode === "all"
-    ? ATTENTION_SORT
-    : view.sort;
+export function effectiveThreadSort(
+  sort: ThreadSortSpec,
+  scopeMode: ThreadView["taskScope"]["mode"],
+): ThreadSortSpec {
+  return sort.key === "selection" && scopeMode === "all" ? ATTENTION_SORT : sort;
 }
 
 function selectionComparator(taskIds: readonly string[]) {
@@ -414,7 +416,7 @@ function selectionComparator(taskIds: readonly string[]) {
 }
 
 function candidateComparator(view: ThreadView) {
-  const sort = effectiveSort(view);
+  const sort = effectiveThreadSort(view.sort, view.taskScope.mode);
   const direction = sort.direction === "desc" ? -1 : 1;
   const sortKey = sort.key;
   const compare =

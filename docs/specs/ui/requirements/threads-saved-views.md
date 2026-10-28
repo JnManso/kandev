@@ -149,6 +149,9 @@ chats.
 - **AC-UI-THREADS-SAVED-VIEWS-003.15:** A view that uses Selection order
   shall show the same column order after a page reload, a backend restart, or
   live task changes. Task attention, activity, and state shall not change it.
+  A selected task that becomes eligible while the page is open shall follow
+  the arrival rule in `AC-UI-THREADS-SAVED-VIEWS-003.8` and take its selected
+  position after a reload or Reapply sort.
 - **AC-UI-THREADS-SAVED-VIEWS-003.16:** Clearing a task and selecting it again
   shall move it to the end of the selection order. Select all shall append
   newly selected visible tasks in their displayed picker order.
