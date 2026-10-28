@@ -334,6 +334,75 @@ describe("queryThreadView attention sort", () => {
   });
 });
 
+describe("queryThreadView selection order", () => {
+  // Attention would rank these needs-action, running, waiting: the reverse of
+  // the selection, so a pass proves the selection drives the order.
+  function rankedTasks(): KanbanState["tasks"] {
+    return [
+      task({
+        id: "waiting",
+        primarySessionState: "WAITING_FOR_INPUT",
+        statusSummary: summary({
+          primary_session: { id: "session-waiting", state: "WAITING_FOR_INPUT" },
+        }),
+      }),
+      task({ id: "running" }),
+      task({
+        id: "action",
+        primarySessionState: "WAITING_FOR_INPUT",
+        statusSummary: summary({
+          primary_session: { id: "session-action", state: "WAITING_FOR_INPUT" },
+          pending_action: "permission",
+        }),
+      }),
+    ];
+  }
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.14, AC-UI-THREADS-SAVED-VIEWS-003.15
+  it("orders a selected scope by the stored selection, ignoring attention", () => {
+    const selectionView = view({
+      taskScope: { mode: "selected", taskIds: ["waiting", "running", "action"] },
+      sort: { key: "selection", direction: "asc" },
+    });
+
+    const result = queryThreadView({ "workflow-1": snapshot(rankedTasks()) }, selectionView);
+
+    expect(result.matchingCandidates.map((candidate) => candidate.taskId)).toEqual([
+      "waiting",
+      "running",
+      "action",
+    ]);
+  });
+
+  it("reverses the selection order when descending", () => {
+    const selectionView = view({
+      taskScope: { mode: "selected", taskIds: ["waiting", "running", "action"] },
+      sort: { key: "selection", direction: "desc" },
+    });
+
+    const result = queryThreadView({ "workflow-1": snapshot(rankedTasks()) }, selectionView);
+
+    expect(result.matchingCandidates.map((candidate) => candidate.taskId)).toEqual([
+      "action",
+      "running",
+      "waiting",
+    ]);
+  });
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.17
+  it("orders a stored selection sort with the all scope as ascending attention", () => {
+    const allView = view({ sort: { key: "selection", direction: "desc" } });
+
+    const result = queryThreadView({ "workflow-1": snapshot(rankedTasks()) }, allView);
+
+    expect(result.matchingCandidates.map((candidate) => candidate.taskId)).toEqual([
+      "action",
+      "running",
+      "waiting",
+    ]);
+  });
+});
+
 describe("queryThreadView sort and admission", () => {
   it("sorts deterministically and limits the admitted candidates", () => {
     const result = queryThreadView(
