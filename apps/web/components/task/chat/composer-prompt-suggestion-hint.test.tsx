@@ -12,7 +12,11 @@ afterEach(cleanup);
 
 function renderHint(submitKey: "enter" | "cmd_enter") {
   render(
-    <ComposerPromptSuggestionHint suggestion="run the tests" submitKey={submitKey} onAccept={() => {}} />,
+    <ComposerPromptSuggestionHint
+      suggestion="run the tests"
+      submitKey={submitKey}
+      onAccept={() => {}}
+    />,
   );
   return screen.getByTestId("prompt-suggestion-accept");
 }

@@ -128,7 +128,10 @@ export function useComposerProps(args: ComposerPropsArgs) {
     legacyUncertainDelivery,
     hasDeliveryRecoveryBlock,
   );
-  const promptSuggestion = useComposerPromptSuggestion(panelState, isMoving);
+  const promptSuggestion = useComposerPromptSuggestion(
+    panelState,
+    isMoving || requiresRecovery || recoveryPresentation.uncertainDelivery,
+  );
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
   const hasPendingContextComments = hasContextComments(panelState);
