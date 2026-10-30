@@ -26,6 +26,11 @@ conversation must pass delivery preflight. It replays the retained g1 setup
 events from zero through the existing bootstrap processor, instead of failing
 with "agent delivery checkpoint missing". Every existing refusal stays in place.
 
+Managed process-exit errors must also retain their producer manager identity.
+The replacement lifecycle compares that identity before it applies the local
+process generation, so a failed predecessor's generation-one error cannot fail
+the new generation-one child.
+
 ## In scope
 
 - Remove the `isResumedSession` condition from `canReplayFreshBootstrapEvents`
@@ -33,6 +38,12 @@ with "agent delivery checkpoint missing". Every existing refusal stays in place.
   and update its comment.
 - Update `TestDeliveryPreflightRetainedStartupEventBeforeNativeInitialization`.
   Add `TestDeliveryPreflightRelaunchKeepsDurableRefusals`.
+- Identify each process-manager lifetime in managed exit events and the
+  authenticated delivery descriptor. Reject replayed errors from a different
+  manager before lifecycle handles them.
+- Add a lifecycle regression that blocks receipt and acknowledgment until the
+  replacement generation commits, then checks that the predecessor error is
+  ignored even when both managers use process generation one.
 
 ## Out of scope
 
@@ -95,3 +106,17 @@ None.
 - `bash scripts/lint-go-changed <both changed Go files>`: 0 issues.
 - `python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all`:
   420 decisions and 1850 specifications validated, and all specification files passed.
+
+Review follow-up:
+
+- Added a per-manager UUID to managed exit events and to the authenticated
+  delivery descriptor. Lifecycle compares this identity before the manager-local
+  process generation.
+- `TestBootstrapReplayIgnoresExitFromFailedPredecessorManager` covers an old
+  terminal error replayed after replacement start. It checks that receipt,
+  callback and ACK wait for the generation-one commit, and that the old error
+  is retired when both manager-local counters equal one. It also checks that a
+  legacy unmarked exit is retired when the current descriptor identifies its
+  manager.
+- `TestProcessManagerIdentityScopesRecoveryDescriptor` checks that each manager
+  gets a distinct identity and the descriptor returns its manager's identity.

@@ -274,4 +274,14 @@ acknowledges any event. If any condition fails, the checkpoint stays missing.
 That covers committed native conversations, retained prompt work, pruned
 history, and an existing cursor. Those cases keep their dedicated recovery
 paths above.
+
+Managed process-exit errors carry both `process_generation` and an opaque
+`process_manager_id`. The authenticated delivery descriptor reports the
+current manager ID. Lifecycle compares manager IDs before it uses the local
+process generation, because each new process manager starts its counter at one.
+An error from a different manager is retired even when both managers report
+generation one. If an event has a manager ID but the current ID is unavailable,
+lifecycle also retires it. A managed exit without an ID is retired when the
+current descriptor has an ID, because the producer cannot be identified. Older
+descriptors keep the existing generation check for compatibility.
 Delivery: [Uncommitted bootstrap relaunch](../../../plans/uncommitted-bootstrap-relaunch/plan.md).
