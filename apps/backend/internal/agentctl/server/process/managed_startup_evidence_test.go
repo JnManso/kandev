@@ -76,9 +76,17 @@ func TestProcessManagerIdentityScopesRecoveryDescriptor(t *testing.T) {
 		WorkDir: t.TempDir(), SessionID: "session", DeliveryIncarnationID: "incarnation",
 		DeliveryStreamID: "incarnation:g1", DurableJournalPath: filepath.Join(t.TempDir(), "delivery.bbolt"),
 	}, newTestLogger(t))
-	t.Cleanup(func() { _ = manager.Stop(context.Background()) })
+	t.Cleanup(func() {
+		if err := manager.StopForTeardown(context.Background()); err != nil {
+			t.Errorf("manager teardown: %v", err)
+		}
+	})
 	replacement := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
-	t.Cleanup(func() { _ = replacement.Stop(context.Background()) })
+	t.Cleanup(func() {
+		if err := replacement.StopForTeardown(context.Background()); err != nil {
+			t.Errorf("replacement teardown: %v", err)
+		}
+	})
 
 	managerID := manager.ProcessManagerID()
 	if managerID == "" || managerID == replacement.ProcessManagerID() {
